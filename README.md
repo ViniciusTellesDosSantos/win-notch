@@ -91,6 +91,8 @@ Coisas que ficaram de fora de propósito:
 - **Sem renovação de token (refresh)**: se `expiresAt` já passou, a chamada nem é tentada — trata como indisponível e cai no fallback. Implementar o fluxo de OAuth refresh às cegas, sem poder testar, era arriscado de mais pra pouco ganho (o próprio `claude` CLI já renova o token sozinho sempre que o usuário usa normalmente).
 - **Fallback automático**: se a fonte oficial falhar por qualquer motivo, o notch mostra a estimativa derivada dos JSONL locais (o que já existia antes) em vez de simplesmente "indisponível" — ver `usage/claude_code.rs`.
 
+**Rate limit (429)**: o app já tomou `429 Too Many Requests` do endpoint em uso real — o polling original (a cada 20s) era rápido demais. `usage/mod.rs` agora segue a mesma estratégia documentada no `src/cache.rs` do `ai-usagebar` (lido diretamente do código-fonte deles): checa no máximo **1x por minuto** (`POLL_INTERVAL`), e ao tomar 429 entra num backoff de **5 minutos** sem tentar de novo (`RATE_LIMIT_BACKOFF`). Enquanto isso, mantém em memória a última leitura oficial bem-sucedida e continua mostrando ela (até 24h de idade, `MAX_CACHE_AGE`) em vez de cair pra estimativa em tokens a cada falha — evita o app ficar "piscando" entre o percentual real e a estimativa.
+
 Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `%`), a linha pequena "(debug: ...)" que aparece embaixo da estimativa mostra o motivo exato — não precisa mais adivinhar. A primeira tentativa caiu 100% das vezes por um bug real: `ureq = { features = ["rustls"] }` habilitava o nome da dependência opcional interna, não a feature `"tls"` de verdade (que é quem liga o conector TLS do `ureq` — confirmado lendo o código-fonte do crate), então o cliente HTTP foi compilado sem suporte a HTTPS nenhum. Corrigido trocando pra `features = ["tls"]`.
 
 ## Limitações conhecidas desta v1
@@ -105,7 +107,7 @@ Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `
 # backend Rust (a partir de src-tauri/)
 cargo check --target x86_64-pc-windows-gnu           # valida os caminhos específicos de Windows
 cargo build --release --target x86_64-pc-windows-gnu # gera o win-notch.exe de verdade
-cargo test                                            # 20 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial)
+cargo test                                            # 21 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial)
 cargo clippy
 cargo fmt
 

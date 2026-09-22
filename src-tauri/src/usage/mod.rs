@@ -1,13 +1,27 @@
 pub mod anthropic_oauth;
 pub mod claude_code;
 
+use anthropic_oauth::{FetchError, OfficialUsage};
 use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// How often the background thread re-scans the transcript files.
-const POLL_INTERVAL: Duration = Duration::from_secs(20);
+/// How often the background thread checks for fresh data — matches the 60s cache TTL
+/// `ai-usagebar` uses for this same endpoint, since polling it much faster than that is
+/// what was drawing 429s in the first place.
+const POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// After a 429, how long to go without even trying the official endpoint again — mirrors
+/// `ai-usagebar`'s own rate-limit backoff for this endpoint.
+const RATE_LIMIT_BACKOFF: chrono::Duration = chrono::Duration::minutes(5);
+
+/// How long a cached successful reading is still worth showing over the token-count
+/// fallback when a fetch fails. Deliberately much shorter than `ai-usagebar`'s 7-day
+/// staleness ceiling (that's a display widget; showing week-old numbers here as if current
+/// felt actively misleading) — 24h means a truly broken token still surfaces the honest
+/// fallback well within the same day.
+const MAX_CACHE_AGE: chrono::Duration = chrono::Duration::hours(24);
 
 #[derive(Debug, Clone)]
 pub enum UsageStatus {
@@ -75,6 +89,14 @@ impl UsageWatcher {
     }
 }
 
+/// The last successful official reading, kept around so a transient failure (rate limit,
+/// a dropped connection, ...) shows slightly-stale real numbers instead of immediately
+/// flipping to the token-count estimate.
+struct OfficialCache {
+    usage: OfficialUsage,
+    fetched_at: DateTime<Utc>,
+}
+
 fn run_loop(snapshot: Arc<Mutex<UsageSnapshot>>, projects_dir: Option<PathBuf>) {
     let Some(dir) = projects_dir else {
         publish(
@@ -84,22 +106,73 @@ fn run_loop(snapshot: Arc<Mutex<UsageSnapshot>>, projects_dir: Option<PathBuf>) 
         return;
     };
 
+    let mut cache: Option<OfficialCache> = None;
+    let mut rate_limited_until: Option<DateTime<Utc>> = None;
+
     loop {
-        let status = match anthropic_oauth::fetch_official_usage() {
-            Ok(usage) => UsageStatus::ActiveOfficial {
-                percent: usage.five_hour.percent,
-                resets_at: usage.five_hour.resets_at,
-                weekly_percent: usage.seven_day.map(|w| w.percent),
-                weekly_resets_at: usage.seven_day.and_then(|w| w.resets_at),
-            },
-            Err(err) => {
-                log::debug!("uso oficial indisponível, caindo pra estimativa local: {err}");
-                fallback_status(&dir, err)
+        let now = Utc::now();
+        let skip_fetch = rate_limited_until.is_some_and(|until| now < until);
+
+        let status = if skip_fetch {
+            cache_or_fallback(
+                &cache,
+                &dir,
+                "aguardando o limite de requisições (429) liberar".into(),
+            )
+        } else {
+            match anthropic_oauth::fetch_official_usage() {
+                Ok(usage) => {
+                    rate_limited_until = None;
+                    let status = to_active_official(&usage);
+                    cache = Some(OfficialCache {
+                        usage,
+                        fetched_at: now,
+                    });
+                    status
+                }
+                Err(FetchError::RateLimited) => {
+                    rate_limited_until = Some(now + RATE_LIMIT_BACKOFF);
+                    log::debug!(
+                        "uso oficial retornou 429, pausando por {}min",
+                        RATE_LIMIT_BACKOFF.num_minutes()
+                    );
+                    cache_or_fallback(&cache, &dir, FetchError::RateLimited.to_string())
+                }
+                Err(FetchError::Other(err)) => {
+                    log::debug!("uso oficial indisponível, caindo pra estimativa local: {err}");
+                    cache_or_fallback(&cache, &dir, err)
+                }
             }
         };
 
         publish(&snapshot, status);
         std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+fn to_active_official(usage: &OfficialUsage) -> UsageStatus {
+    UsageStatus::ActiveOfficial {
+        percent: usage.five_hour.percent,
+        resets_at: usage.five_hour.resets_at,
+        weekly_percent: usage.seven_day.map(|w| w.percent),
+        weekly_resets_at: usage.seven_day.and_then(|w| w.resets_at),
+    }
+}
+
+/// Serves the cached official reading if it's still fresh enough, otherwise falls back to
+/// the JSONL-derived estimate — the point of the cache is exactly to absorb a run of
+/// failures (like the 429 backoff window) without the UI flapping between the real
+/// percentage and the estimate every time a fetch fails.
+fn cache_or_fallback(
+    cache: &Option<OfficialCache>,
+    dir: &std::path::Path,
+    official_error: String,
+) -> UsageStatus {
+    match cache {
+        Some(entry) if Utc::now() - entry.fetched_at < MAX_CACHE_AGE => {
+            to_active_official(&entry.usage)
+        }
+        _ => fallback_status(dir, official_error),
     }
 }
 

@@ -86,6 +86,7 @@ pub struct PercentWindow {
 /// didn't include it (older API versions, a plan without weekly limits, etc) — that's not
 /// treated as a failure, since `five_hour` is the information the rest of the app actually
 /// depends on.
+#[derive(Debug, Clone, Copy)]
 pub struct OfficialUsage {
     pub five_hour: PercentWindow,
     pub seven_day: Option<PercentWindow>,
@@ -114,11 +115,41 @@ fn parse_usage_response(body: &str) -> Result<OfficialUsage, String> {
     })
 }
 
+/// Distinguishes "the endpoint is rate-limiting us" from everything else, since callers
+/// need to back off specifically on that (see `usage/mod.rs`'s `RATE_LIMIT_BACKOFF`) rather
+/// than just retrying at the normal poll interval, which would just draw another 429.
+#[derive(Debug)]
+pub enum FetchError {
+    RateLimited,
+    Other(String),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchError::RateLimited => write!(f, "limite de requisições atingido (429)"),
+            FetchError::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl From<String> for FetchError {
+    fn from(msg: String) -> Self {
+        FetchError::Other(msg)
+    }
+}
+
+impl From<&str> for FetchError {
+    fn from(msg: &str) -> Self {
+        FetchError::Other(msg.to_string())
+    }
+}
+
 #[cfg(windows)]
-pub fn fetch_official_usage() -> Result<OfficialUsage, String> {
+pub fn fetch_official_usage() -> Result<OfficialUsage, FetchError> {
     let creds = read_credentials().ok_or("credenciais do Claude Code não encontradas")?;
     if creds.is_expired(Utc::now()) {
-        return Err("token OAuth expirado".to_string());
+        return Err("token OAuth expirado".into());
     }
 
     let response = ureq::get(USAGE_ENDPOINT)
@@ -127,22 +158,34 @@ pub fn fetch_official_usage() -> Result<OfficialUsage, String> {
         .set("User-Agent", USER_AGENT)
         .set("Content-Type", "application/json")
         .call()
-        .map_err(|e| format!("falha na requisição: {e}"))?;
+        .map_err(|e| match e {
+            ureq::Error::Status(429, _) => FetchError::RateLimited,
+            other => FetchError::Other(format!("falha na requisição: {other}")),
+        })?;
 
     let body = response
         .into_string()
-        .map_err(|e| format!("falha ao ler resposta: {e}"))?;
-    parse_usage_response(&body)
+        .map_err(|e| FetchError::Other(format!("falha ao ler resposta: {e}")))?;
+    parse_usage_response(&body).map_err(FetchError::Other)
 }
 
 #[cfg(not(windows))]
-pub fn fetch_official_usage() -> Result<OfficialUsage, String> {
-    Err("uso oficial só é buscado no Windows".to_string())
+pub fn fetch_official_usage() -> Result<OfficialUsage, FetchError> {
+    Err("uso oficial só é buscado no Windows".into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limited_and_other_errors_display_differently() {
+        assert_eq!(
+            FetchError::RateLimited.to_string(),
+            "limite de requisições atingido (429)"
+        );
+        assert_eq!(FetchError::Other("deu ruim".into()).to_string(), "deu ruim");
+    }
 
     #[test]
     fn expired_token_is_detected() {
