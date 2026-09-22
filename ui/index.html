@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>win-notch</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="notch.css" />
+  </head>
+  <body>
+    <div id="notch" class="edge-top" data-state="collapsed">
+      <div id="pill">
+        <span id="status-dot" data-state="loading"></span>
+        <span id="pill-label">win-notch</span>
+      </div>
+
+      <div id="panel">
+        <header id="panel-header">
+          <span id="panel-title">Claude Code</span>
+          <span id="header-dot" data-state="loading"></span>
+        </header>
+
+        <div id="usage-row">
+          <svg id="usage-ring" viewBox="0 0 64 64" width="56" height="56">
+            <circle class="ring-track" cx="32" cy="32" r="27" />
+            <circle id="ring-progress" class="ring-progress" cx="32" cy="32" r="27" />
+          </svg>
+          <div id="usage-info">
+            <div id="usage-primary">Carregando…</div>
+            <div id="usage-secondary" class="muted"></div>
+          </div>
+        </div>
+
+        <p id="usage-footnote" class="muted small"></p>
+
+        <div id="divider"></div>
+
+        <button id="capture-btn" type="button">
+          <span id="capture-icon">⧉</span>
+          Capturar região
+        </button>
+        <p id="capture-message" class="small"></p>
+
+        <p id="calendar-placeholder" class="muted small">Agenda: em breve</p>
+        <p id="freshness" class="muted tiny"></p>
+      </div>
+    </div>
+
+    <script src="notch.js"></script>
+  </body>
+</html>

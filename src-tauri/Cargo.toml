@@ -1,21 +1,26 @@
 [package]
 name = "win-notch"
 version = "0.1.0"
-edition = "2021"
 description = "Overlay estilo notch para Windows: uso do Claude Code e captura de tela rápida."
+edition = "2021"
+
+[lib]
+name = "win_notch_lib"
+# Desktop-only app, so just rlib for the "main.rs binary links this lib crate" split —
+# no need for staticlib/cdylib (those are for mobile/FFI consumers), and cdylib in
+# particular makes the linker emit a DLL export table that mingw-w64's ld chokes on
+# ("export ordinal too large") given how many symbols Tauri's dependency tree exports.
+crate-type = ["rlib"]
 
 [[bin]]
 name = "win-notch"
 path = "src/main.rs"
 
-[profile.release]
-opt-level = "s"
-lto = true
-strip = true
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts", "persistence"] }
-egui = "0.29"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
@@ -27,16 +32,11 @@ log = "0.4"
 env_logger = "0.11"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_Graphics_Gdi",
-    "Win32_System_Registry",
-] }
-tray-icon = "0.19"
 auto-launch = "0.5"
 arboard = "3"
 xcap = "0.0.14"
 
-[dev-dependencies]
-tempfile = "3"
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
