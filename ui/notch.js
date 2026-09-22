@@ -11,7 +11,7 @@
   // via the monitor's scaleFactor at the one place each is read (toLogicalMonitor,
   // onDragSettled) — everything past that boundary stays logical.
   // COLLAPSED_SIZE is kept in sync by hand with COLLAPSED_SIZE in src-tauri/src/config.rs.
-  const COLLAPSED_SIZE = { width: 120, height: 28 };
+  const COLLAPSED_SIZE = { width: 32, height: 32 };
   const EXPANDED_SIZE = { width: 340, height: 210 };
   const HOVER_EXPAND_DELAY = 120;
   const HOVER_COLLAPSE_DELAY = 350;
@@ -19,9 +19,11 @@
   const USAGE_POLL_MS = 8000;
   const USAGE_WINDOW_MS = 5 * 60 * 60 * 1000;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 27;
+  const PILL_RING_CIRCUMFERENCE = 2 * Math.PI * 12;
 
   const notchEl = document.getElementById("notch");
-  const statusDot = document.getElementById("status-dot");
+  const pillRing = document.getElementById("pill-ring");
+  const pillRingProgress = document.getElementById("pill-ring-progress");
   const headerDot = document.getElementById("header-dot");
   const usagePrimary = document.getElementById("usage-primary");
   const usageSecondary = document.getElementById("usage-secondary");
@@ -205,33 +207,30 @@
     return `${hours}h${String(minutes).padStart(2, "0")}min`;
   }
 
-  function setDotState(state) {
-    statusDot.dataset.state = state;
-    headerDot.dataset.state = state;
-  }
-
   function renderUsage(dto) {
     lastUsageDto = dto;
-    setDotState(dto.status);
+    headerDot.dataset.state = dto.status;
+    pillRing.dataset.state = dto.status;
+
+    // Fraction (0–1) driving both rings — the mini one at rest and the big one expanded
+    // show the exact same number, just at different sizes.
+    let fraction = 0;
 
     switch (dto.status) {
       case "loading":
         usagePrimary.textContent = "Carregando…";
         usageSecondary.textContent = "";
         usageFootnote.textContent = "";
-        ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE;
         break;
       case "unavailable":
         usagePrimary.textContent = "Sem dados locais";
         usageSecondary.textContent = dto.reason ?? "";
         usageFootnote.textContent = "";
-        ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE;
         break;
       case "idle":
         usagePrimary.textContent = "Sem sessão ativa";
         usageSecondary.textContent = "nas últimas 5h";
         usageFootnote.textContent = "";
-        ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE;
         break;
       case "active_official": {
         const percent = Math.round(dto.percent);
@@ -243,9 +242,7 @@
           usageSecondary.textContent = "janela de 5h";
         }
         usageFootnote.textContent = "";
-
-        const fraction = Math.min(Math.max(dto.percent / 100, 0), 1);
-        ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - fraction));
+        fraction = Math.min(Math.max(dto.percent / 100, 0), 1);
         break;
       }
       case "active": {
@@ -258,12 +255,13 @@
           // release build, so this is the only place a failure here is ever visible.
           usageFootnote.textContent += ` (debug: ${dto.reason})`;
         }
-
-        const elapsedFraction = Math.min(Math.max(1 - remainingMs / USAGE_WINDOW_MS, 0), 1);
-        ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - elapsedFraction));
+        fraction = Math.min(Math.max(1 - remainingMs / USAGE_WINDOW_MS, 0), 1);
         break;
       }
     }
+
+    ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - fraction));
+    pillRingProgress.style.strokeDashoffset = String(PILL_RING_CIRCUMFERENCE * (1 - fraction));
 
     const ageSeconds = Math.max(Math.round((Date.now() - new Date(dto.last_updated).getTime()) / 1000), 0);
     freshnessEl.textContent = `atualizado há ${ageSeconds}s`;

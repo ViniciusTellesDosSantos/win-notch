@@ -1,8 +1,8 @@
 #notch {
   position: absolute;
-  width: 120px;
-  height: 28px;
-  border-radius: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
   background: var(--bg);
   backdrop-filter: blur(26px) saturate(180%);
   -webkit-backdrop-filter: blur(26px) saturate(180%);
@@ -50,18 +50,41 @@
   inset: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 14px;
+  justify-content: center;
   opacity: 1;
   transition: opacity 110ms ease;
-  white-space: nowrap;
 }
 #notch.expanded #pill {
   opacity: 0;
   pointer-events: none;
 }
 
-#status-dot,
+/* Mini usage ring shown at rest — icon-only, no label, mirrors the big ring in the
+   expanded panel (same fraction, same color logic) at a glance. */
+#pill-ring .track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 3;
+}
+#pill-ring .progress {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 16px 16px;
+  stroke-dasharray: 75.4;
+  stroke-dashoffset: 75.4;
+  transition: stroke-dashoffset 400ms ease, stroke 200ms ease;
+}
+#pill-ring[data-state="active"] .progress,
+#pill-ring[data-state="active_official"] .progress {
+  stroke: var(--accent);
+}
+#pill-ring[data-state="unavailable"] .progress {
+  stroke: var(--warn);
+}
+
 #header-dot {
   width: 8px;
   height: 8px;
@@ -70,24 +93,13 @@
   flex: none;
   transition: background 200ms ease, box-shadow 200ms ease;
 }
-#status-dot[data-state="active"],
 #header-dot[data-state="active"],
-#status-dot[data-state="active_official"],
 #header-dot[data-state="active_official"] {
   background: var(--accent);
   box-shadow: 0 0 8px 1px var(--accent-dim);
 }
-#status-dot[data-state="unavailable"],
 #header-dot[data-state="unavailable"] {
   background: var(--warn);
-}
-
-#pill-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 #panel {
@@ -187,7 +199,10 @@
   transform: scale(0.98);
 }
 #capture-icon {
-  font-size: 13px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  flex: none;
 }
 
 #capture-message {

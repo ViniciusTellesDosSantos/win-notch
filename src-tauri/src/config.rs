@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// Collapsed pill size, in *logical* pixels — kept in sync by hand with `COLLAPSED_SIZE`
 /// in `ui/notch.js`, since there's no build step sharing constants between the two.
-pub const COLLAPSED_SIZE: (u32, u32) = (120, 28);
+pub const COLLAPSED_SIZE: (u32, u32) = (32, 32);
 
 /// Which screen edge the notch is anchored to. Matches the strings used on the JS side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
