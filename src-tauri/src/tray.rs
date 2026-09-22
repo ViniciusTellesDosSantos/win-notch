@@ -20,8 +20,15 @@ pub fn setup(app: &App) -> tauri::Result<()> {
         autostart_enabled,
         None::<&str>,
     )?;
+    let reset_position_item = MenuItem::with_id(
+        app,
+        "reset_position",
+        "Redefinir posição",
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&autostart_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&autostart_item, &reset_position_item, &quit_item])?;
 
     let icon = app
         .default_window_icon()
@@ -46,6 +53,10 @@ pub fn setup(app: &App) -> tauri::Result<()> {
                     }
                     Err(err) => log::warn!("falha ao alternar autostart: {err}"),
                 }
+            }
+            "reset_position" => {
+                let state = app.state::<SettingsState>();
+                crate::reset_notch_position(app, &state);
             }
             "quit" => app.exit(0),
             _ => {}

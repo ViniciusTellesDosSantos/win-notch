@@ -6,7 +6,7 @@ Nesta primeira versão:
 
 - **Percentual de uso do plano do Claude Code** — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
 - **Captura de tela por seleção de região** — clique no botão no painel expandido, arraste um retângulo, ele é copiado direto pra área de transferência. `Esc` cancela.
-- **Notch arrastável** — segure e arraste a pílula; ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar, e a posição fica salva.
+- **Notch arrastável** — segure e arraste a pílula; ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar, e a posição fica salva. Colapsada, a pílula é só um ícone de 32px sem texto (anel de uso em miniatura) — se você a arrastar pra algum lugar e "perdê-la" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
 
 ## Por que Tauri (Rust + HTML/CSS), e não só egui?

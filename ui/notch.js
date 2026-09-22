@@ -310,15 +310,24 @@
 
   // --- Boot --------------------------------------------------------------------------
 
+  function applySettings(settings) {
+    edge = settings.edge;
+    offsetCenter = settings.offset_along_edge;
+    applyEdgeClass();
+  }
+
+  // Fired by the tray's "Redefinir posição" action: the Rust side already moved the real
+  // window, this just keeps our local edge/offsetCenter from going stale, since they drive
+  // the next hover-expand or drag — without this, the notch would silently "snap back" to
+  // the old position the next time either of those runs.
+  listen("notch-position-reset", (event) => applySettings(event.payload));
+
   (async () => {
     try {
-      const settings = await invoke("get_settings");
-      edge = settings.edge;
-      offsetCenter = settings.offset_along_edge;
+      applySettings(await invoke("get_settings"));
     } catch (err) {
       console.error("failed to load settings", err);
     }
-    applyEdgeClass();
     refreshUsage();
   })();
 })();
