@@ -22,6 +22,8 @@ pub struct ScreenshotResult {
 pub struct UsageDto {
     pub status: &'static str,
     pub reason: Option<String>,
+    /// Official percentage of the 5h plan limit used (only set for `"active_official"`).
+    pub percent: Option<f64>,
     pub tokens: Option<u64>,
     pub started_at: Option<String>,
     pub resets_at: Option<String>,
@@ -37,6 +39,7 @@ pub fn get_usage(state: State<UsageWatcher>) -> UsageDto {
         UsageStatus::Loading => UsageDto {
             status: "loading",
             reason: None,
+            percent: None,
             tokens: None,
             started_at: None,
             resets_at: None,
@@ -45,6 +48,7 @@ pub fn get_usage(state: State<UsageWatcher>) -> UsageDto {
         UsageStatus::Unavailable(reason) => UsageDto {
             status: "unavailable",
             reason: Some(reason),
+            percent: None,
             tokens: None,
             started_at: None,
             resets_at: None,
@@ -53,9 +57,19 @@ pub fn get_usage(state: State<UsageWatcher>) -> UsageDto {
         UsageStatus::Idle => UsageDto {
             status: "idle",
             reason: None,
+            percent: None,
             tokens: None,
             started_at: None,
             resets_at: None,
+            last_updated,
+        },
+        UsageStatus::ActiveOfficial { percent, resets_at } => UsageDto {
+            status: "active_official",
+            reason: None,
+            percent: Some(percent),
+            tokens: None,
+            started_at: None,
+            resets_at: resets_at.map(|dt| dt.to_rfc3339()),
             last_updated,
         },
         UsageStatus::Active {
@@ -65,6 +79,7 @@ pub fn get_usage(state: State<UsageWatcher>) -> UsageDto {
         } => UsageDto {
             status: "active",
             reason: None,
+            percent: None,
             tokens: Some(tokens),
             started_at: Some(started_at.to_rfc3339()),
             resets_at: Some(resets_at.to_rfc3339()),

@@ -4,7 +4,7 @@ Overlay estilo "notch" para Windows, inspirado no [codenotch](https://github.com
 
 Nesta primeira versão:
 
-- **Barra de uso do Claude Code** — derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl`, mostrando tokens consumidos na janela móvel de 5h (com um anel indicando quanto dessa janela já passou) e quando ela reinicia. Não é o limite oficial do plano (a Anthropic não publica isso) — é uma estimativa, igual à filosofia do codenotch para fontes não-oficiais.
+- **Percentual de uso do plano do Claude Code** — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
 - **Captura de tela por seleção de região** — clique no botão no painel expandido, arraste um retângulo, ele é copiado direto pra área de transferência. `Esc` cancela.
 - **Notch arrastável** — segure e arraste a pílula; ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar, e a posição fica salva.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
@@ -33,8 +33,9 @@ A primeira versão deste app era 100% Rust com `egui`/`eframe`. Visualmente fico
         ├── commands.rs          # comandos invocáveis do JS (get_usage, capture_region, ...)
         ├── config.rs            # Settings (borda, posição, autostart) persistidos em TOML
         ├── usage/
-        │   ├── mod.rs            # thread de polling + snapshot compartilhado
-        │   └── claude_code.rs     # parsing dos JSONL e cálculo da janela de 5h
+        │   ├── mod.rs             # thread de polling + snapshot compartilhado
+        │   ├── anthropic_oauth.rs  # percentual oficial via credenciais do claude CLI
+        │   └── claude_code.rs      # fallback: parsing dos JSONL e cálculo da janela de 5h
         ├── screenshot.rs        # captura de monitores (xcap) + crop + clipboard (arboard)
         ├── tray.rs              # ícone na bandeja (API nativa do Tauri) e menu
         └── autostart.rs         # toggle "iniciar com o Windows"
@@ -80,10 +81,21 @@ Isso NÃO gera o instalador (`cargo tauri build` cuida disso e precisa de ferram
 
 **Importante**: diferente da versão egui anterior (binário único), esse `.exe` **não é autocontido** — ele carrega `WebView2Loader.dll` em tempo de execução (é assim que o Tauri fala com o WebView2 do Windows). O build já deixa esse arquivo pronto do lado do `.exe`, em `target/x86_64-pc-windows-gnu/release/WebView2Loader.dll` — **os dois arquivos precisam estar na mesma pasta** para o `.exe` abrir. Sem o `.dll` ali do lado, o Windows recusa abrir o processo com o erro genérico "O aplicativo não pôde ser inicializado corretamente (0xc000007b)". Rodar `cargo tauri build` de verdade (com as ferramentas de instalador do Windows) resolveria isso automaticamente empacotando tudo junto.
 
+## Percentual de uso: como funciona e os riscos
+
+O codenotch mostra um percentual de uso real do plano, não só tokens brutos. Pra fazer o mesmo pro Claude Code, `usage/anthropic_oauth.rs` lê o arquivo `%USERPROFILE%\.claude\.credentials.json` que o próprio `claude` CLI mantém (`{"claudeAiOauth": {"accessToken", "expiresAt", ...}}`) e chama `GET https://api.anthropic.com/api/oauth/usage` com esse token — o mesmo endpoint (não documentado publicamente pela Anthropic) que o `/usage` do REPL do Claude Code usa por baixo dos panos.
+
+Isso **nunca foi validado contra uma chamada de rede real** neste ambiente de desenvolvimento: o classificador de auto-mode desta sessão bloqueia qualquer tentativa de explorar/ler credenciais locais (razoável, é uma proteção contra exfiltração), então não dava pra testar isso tocando nas próprias credenciais daqui. A implementação segue exatamente o que dois projetos open-source independentes documentam fazer (endpoint, headers e formato da resposta): [codenotch](https://github.com/vinzdg/codenotch) (macOS) e [akitaonrails/ai-usagebar](https://github.com/akitaonrails/ai-usagebar/blob/main/src/anthropic/fetch.rs) (Rust, multiplataforma incluindo Windows — o código-fonte deles foi lido diretamente do GitHub pra confirmar os nomes de campo exatos).
+
+Coisas que ficaram de fora de propósito:
+- **Sem renovação de token (refresh)**: se `expiresAt` já passou, a chamada nem é tentada — trata como indisponível e cai no fallback. Implementar o fluxo de OAuth refresh às cegas, sem poder testar, era arriscado de mais pra pouco ganho (o próprio `claude` CLI já renova o token sozinho sempre que o usuário usa normalmente).
+- **Fallback automático**: se a fonte oficial falhar por qualquer motivo, o notch mostra a estimativa derivada dos JSONL locais (o que já existia antes) em vez de simplesmente "indisponível" — ver `usage/claude_code.rs`.
+
+Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `%`), o próximo passo de diagnóstico é checar se `%USERPROFILE%\.claude\.credentials.json` existe e se a chamada à API está retornando erro — nada disso pode ser depurado a partir daqui, só numa máquina Windows real.
+
 ## Limitações conhecidas desta v1
 
 - **Multi-monitor**: o cálculo de borda/snap usa o monitor atual da janela; um monitor secundário com posição/escala muito diferente da primária pode se comportar de forma menos precisa. Candidato a melhoria futura.
-- **Teto de uso do Claude Code**: como não existe API oficial de quota, o app mostra tokens consumidos + tempo até o reset da janela de 5h (via um anel de progresso baseado no tempo decorrido, não numa porcentagem de limite inventada).
 - Sem ícone `.ico` customizado com design real ainda (usa um quadrado sólido gerado programaticamente como placeholder).
 - **Nunca testado visualmente numa tela real** — hover/expand, drag entre bordas, o overlay de seleção de captura e o ícone da bandeja foram validados só por compilação (`cargo check`/`cargo build` cross-compilado) e pela leitura cuidadosa da API do Tauri (bundle JS local, não documentação externa, já que este ambiente não tem acesso a ela). Precisa de uma passada manual numa máquina Windows de verdade.
 
@@ -93,7 +105,7 @@ Isso NÃO gera o instalador (`cargo tauri build` cuida disso e precisa de ferram
 # backend Rust (a partir de src-tauri/)
 cargo check --target x86_64-pc-windows-gnu           # valida os caminhos específicos de Windows
 cargo build --release --target x86_64-pc-windows-gnu # gera o win-notch.exe de verdade
-cargo test                                            # 11 testes unitários (geometria de borda/centro, parsing de uso)
+cargo test                                            # 18 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial)
 cargo clippy
 cargo fmt
 

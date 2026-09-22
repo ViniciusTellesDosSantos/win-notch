@@ -71,7 +71,9 @@
   transition: background 200ms ease, box-shadow 200ms ease;
 }
 #status-dot[data-state="active"],
-#header-dot[data-state="active"] {
+#header-dot[data-state="active"],
+#status-dot[data-state="active_official"],
+#header-dot[data-state="active_official"] {
   background: var(--accent);
   box-shadow: 0 0 8px 1px var(--accent-dim);
 }

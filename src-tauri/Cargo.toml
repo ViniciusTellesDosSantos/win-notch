@@ -35,6 +35,10 @@ env_logger = "0.11"
 auto-launch = "0.5"
 arboard = "3"
 xcap = "0.0.14"
+# rustls instead of the default native-tls backend: pure-Rust TLS, no OpenSSL to link
+# against — matters here because that linking is painful/unreliable when cross-compiling
+# with mingw-w64 rather than building on a real Windows host.
+ureq = { version = "2", default-features = false, features = ["rustls"] }
 
 [profile.release]
 opt-level = "s"

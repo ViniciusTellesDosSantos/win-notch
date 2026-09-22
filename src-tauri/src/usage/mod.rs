@@ -1,3 +1,4 @@
+pub mod anthropic_oauth;
 pub mod claude_code;
 
 use chrono::{DateTime, Utc};
@@ -12,7 +13,14 @@ const POLL_INTERVAL: Duration = Duration::from_secs(20);
 pub enum UsageStatus {
     /// First scan hasn't completed yet.
     Loading,
-    /// There's an active 5h usage window with `tokens` consumed so far.
+    /// Official percentage of the 5h plan limit used, straight from the same endpoint the
+    /// `claude` CLI's own `/usage` reads — not an estimate.
+    ActiveOfficial {
+        percent: f64,
+        resets_at: Option<DateTime<Utc>>,
+    },
+    /// There's an active 5h usage window with `tokens` consumed so far. Fallback used when
+    /// the official source (`anthropic_oauth`) isn't available for any reason.
     Active {
         tokens: u64,
         started_at: DateTime<Utc>,
@@ -71,24 +79,40 @@ fn run_loop(snapshot: Arc<Mutex<UsageSnapshot>>, projects_dir: Option<PathBuf>) 
     };
 
     loop {
-        let status = if dir.is_dir() {
-            let events = claude_code::scan_token_events(&dir);
-            match claude_code::compute_current_block(&events, Utc::now()) {
-                Some(block) => UsageStatus::Active {
-                    tokens: block.tokens,
-                    started_at: block.started_at,
-                    resets_at: block.resets_at(),
-                },
-                None => UsageStatus::Idle,
+        let status = match anthropic_oauth::fetch_official_usage() {
+            Ok(window) => UsageStatus::ActiveOfficial {
+                percent: window.percent,
+                resets_at: window.resets_at,
+            },
+            Err(err) => {
+                log::debug!("uso oficial indisponível, caindo pra estimativa local: {err}");
+                fallback_status(&dir)
             }
-        } else {
-            UsageStatus::Unavailable(
-                "Claude Code ainda não gerou dados locais nesta máquina".into(),
-            )
         };
 
         publish(&snapshot, status);
         std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// The JSONL-derived estimate used whenever the official source (`anthropic_oauth`) isn't
+/// available — see the module docs on `anthropic_oauth` for why that's expected to happen
+/// at least some of the time (no refresh-token handling, network issues, etc).
+fn fallback_status(dir: &std::path::Path) -> UsageStatus {
+    if !dir.is_dir() {
+        return UsageStatus::Unavailable(
+            "Claude Code ainda não gerou dados locais nesta máquina".into(),
+        );
+    }
+
+    let events = claude_code::scan_token_events(dir);
+    match claude_code::compute_current_block(&events, Utc::now()) {
+        Some(block) => UsageStatus::Active {
+            tokens: block.tokens,
+            started_at: block.started_at,
+            resets_at: block.resets_at(),
+        },
+        None => UsageStatus::Idle,
     }
 }
 

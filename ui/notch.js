@@ -126,10 +126,28 @@
 
   // --- Drag to reposition + edge snap -------------------------------------------------
 
-  document.getElementById("pill").addEventListener("mousedown", async (event) => {
-    if (event.button !== 0 || isExpanded) return;
-    isDragging = true;
+  // Listens on the whole notch (not just #pill): hovering for HOVER_EXPAND_DELAY (120ms)
+  // before the user manages to press the button is the common case, not the exception, so
+  // by the time mousedown would fire on #pill it's usually already hidden behind the
+  // expanded panel (pointer-events: none). Dragging from the panel background works too;
+  // only the capture button opts out, so it can still be clicked normally.
+  notchEl.addEventListener("mousedown", async (event) => {
+    if (event.button !== 0 || event.target.closest("#capture-btn")) return;
+    clearTimeout(expandTimer);
+    expandTimer = null;
     clearTimeout(collapseTimer);
+    collapseTimer = null;
+
+    // Drag math (here and in onDragSettled) assumes the window's physical footprint is
+    // COLLAPSED_SIZE throughout — force that *before* the native drag starts rather than
+    // only after, so a drag begun from the expanded panel doesn't run with mismatched size.
+    if (isExpanded) {
+      isExpanded = false;
+      notchEl.classList.remove("expanded");
+      await moveAndResize(COLLAPSED_SIZE);
+    }
+
+    isDragging = true;
     await appWindow.startDragging();
   });
 
@@ -215,6 +233,21 @@
         usageFootnote.textContent = "";
         ringProgress.style.strokeDashoffset = RING_CIRCUMFERENCE;
         break;
+      case "active_official": {
+        const percent = Math.round(dto.percent);
+        usagePrimary.textContent = `${percent}%`;
+        if (dto.resets_at) {
+          const remainingMs = new Date(dto.resets_at).getTime() - Date.now();
+          usageSecondary.textContent = `reinicia em ${formatDuration(remainingMs)}`;
+        } else {
+          usageSecondary.textContent = "janela de 5h";
+        }
+        usageFootnote.textContent = "";
+
+        const fraction = Math.min(Math.max(dto.percent / 100, 0), 1);
+        ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - fraction));
+        break;
+      }
       case "active": {
         usagePrimary.textContent = `${formatTokens(dto.tokens)} tokens`;
         const remainingMs = new Date(dto.resets_at).getTime() - Date.now();
