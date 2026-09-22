@@ -18,6 +18,7 @@
   const SNAP_MARGIN = 48; // logical px
   const USAGE_POLL_MS = 8000;
   const USAGE_WINDOW_MS = 5 * 60 * 60 * 1000;
+  const ALWAYS_ON_TOP_REASSERT_MS = 3000;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 27;
   const PILL_RING_CIRCUMFERENCE = 2 * Math.PI * 12;
 
@@ -42,6 +43,17 @@
   let collapseTimer = null;
   let dragSettleTimer = null;
   let lastUsageDto = null;
+
+  // tauri.conf.json's alwaysOnTop only sets Windows' topmost flag once, at window
+  // creation. That flag isn't a single fixed layer, though — it's a band shared with every
+  // other topmost window, and whichever of those gets activated most recently ends up
+  // nearer the top *within* that band. Any other app that also marks itself topmost (tray
+  // flyouts, overlays, other widgets) can end up drawing over the notch over time. The
+  // standard fix for exactly this is what this does: keep re-asserting topmost instead of
+  // only setting it once.
+  setInterval(() => {
+    appWindow.setAlwaysOnTop(true).catch(() => {});
+  }, ALWAYS_ON_TOP_REASSERT_MS);
 
   function applyEdgeClass() {
     notchEl.classList.remove("edge-top", "edge-bottom", "edge-left", "edge-right");
