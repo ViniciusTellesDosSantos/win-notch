@@ -41,7 +41,7 @@
 
 #notch.expanded {
   width: 340px;
-  height: 210px;
+  height: 232px;
   border-radius: 22px;
 }
 
@@ -165,8 +165,12 @@
   margin-top: 2px;
 }
 
+#usage-weekly {
+  margin: 10px 0 0;
+}
+
 #usage-footnote {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   line-height: 1.35;
 }
 

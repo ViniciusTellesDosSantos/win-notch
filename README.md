@@ -4,7 +4,7 @@ Overlay estilo "notch" para Windows, inspirado no [codenotch](https://github.com
 
 Nesta primeira versão:
 
-- **Percentual de uso do plano do Claude Code** — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
+- **Percentual de uso do plano do Claude Code** (janela de 5h **e** semanal) — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. O percentual semanal só aparece quando a resposta da API o inclui — se não vier, o app não mostra a linha, não inventa o número. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h, sem dado semanal nesse modo) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
 - **Captura de tela por seleção de região** — clique no botão no painel expandido, arraste um retângulo, ele é copiado direto pra área de transferência. `Esc` cancela.
 - **Notch arrastável** — segure e arraste a pílula; ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar, e a posição fica salva. Colapsada, a pílula é só um ícone de 32px sem texto (anel de uso em miniatura) — se você a arrastar pra algum lugar e "perdê-la" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
@@ -105,7 +105,7 @@ Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `
 # backend Rust (a partir de src-tauri/)
 cargo check --target x86_64-pc-windows-gnu           # valida os caminhos específicos de Windows
 cargo build --release --target x86_64-pc-windows-gnu # gera o win-notch.exe de verdade
-cargo test                                            # 18 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial)
+cargo test                                            # 20 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial)
 cargo clippy
 cargo fmt
 

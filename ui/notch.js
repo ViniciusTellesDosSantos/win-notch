@@ -12,7 +12,7 @@
   // onDragSettled) — everything past that boundary stays logical.
   // COLLAPSED_SIZE is kept in sync by hand with COLLAPSED_SIZE in src-tauri/src/config.rs.
   const COLLAPSED_SIZE = { width: 32, height: 32 };
-  const EXPANDED_SIZE = { width: 340, height: 210 };
+  const EXPANDED_SIZE = { width: 340, height: 232 };
   const HOVER_EXPAND_DELAY = 120;
   const HOVER_COLLAPSE_DELAY = 350;
   const SNAP_MARGIN = 48; // logical px
@@ -27,6 +27,7 @@
   const headerDot = document.getElementById("header-dot");
   const usagePrimary = document.getElementById("usage-primary");
   const usageSecondary = document.getElementById("usage-secondary");
+  const usageWeekly = document.getElementById("usage-weekly");
   const usageFootnote = document.getElementById("usage-footnote");
   const ringProgress = document.getElementById("ring-progress");
   const captureBtn = document.getElementById("capture-btn");
@@ -207,6 +208,18 @@
     return `${hours}h${String(minutes).padStart(2, "0")}min`;
   }
 
+  // The weekly window can reset up to 7 days out — "172h34min" is technically correct but
+  // unreadable, so once it's past a day this switches to a coarser "3d 4h" instead.
+  function formatLongDuration(ms) {
+    const totalHours = Math.max(Math.round(ms / 3_600_000), 0);
+    if (totalHours < 24) {
+      return formatDuration(ms);
+    }
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    return `${days}d ${hours}h`;
+  }
+
   function renderUsage(dto) {
     lastUsageDto = dto;
     headerDot.dataset.state = dto.status;
@@ -215,6 +228,8 @@
     // Fraction (0–1) driving both rings — the mini one at rest and the big one expanded
     // show the exact same number, just at different sizes.
     let fraction = 0;
+
+    usageWeekly.textContent = "";
 
     switch (dto.status) {
       case "loading":
@@ -242,6 +257,17 @@
           usageSecondary.textContent = "janela de 5h";
         }
         usageFootnote.textContent = "";
+
+        if (dto.weekly_percent != null) {
+          const weeklyPercent = Math.round(dto.weekly_percent);
+          if (dto.weekly_resets_at) {
+            const weeklyRemainingMs = new Date(dto.weekly_resets_at).getTime() - Date.now();
+            usageWeekly.textContent = `Semana: ${weeklyPercent}% · reinicia em ${formatLongDuration(weeklyRemainingMs)}`;
+          } else {
+            usageWeekly.textContent = `Semana: ${weeklyPercent}%`;
+          }
+        }
+
         fraction = Math.min(Math.max(dto.percent / 100, 0), 1);
         break;
       }

@@ -13,11 +13,14 @@ const POLL_INTERVAL: Duration = Duration::from_secs(20);
 pub enum UsageStatus {
     /// First scan hasn't completed yet.
     Loading,
-    /// Official percentage of the 5h plan limit used, straight from the same endpoint the
-    /// `claude` CLI's own `/usage` reads — not an estimate.
+    /// Official percentage of the 5h and 7d plan limits used, straight from the same
+    /// endpoint the `claude` CLI's own `/usage` reads — not an estimate. `weekly_*` is
+    /// `None` if the endpoint's response simply didn't include a `seven_day` window.
     ActiveOfficial {
         percent: f64,
         resets_at: Option<DateTime<Utc>>,
+        weekly_percent: Option<f64>,
+        weekly_resets_at: Option<DateTime<Utc>>,
     },
     /// There's an active 5h usage window with `tokens` consumed so far. Fallback used when
     /// the official source (`anthropic_oauth`) isn't available for any reason — `official_error`
@@ -83,9 +86,11 @@ fn run_loop(snapshot: Arc<Mutex<UsageSnapshot>>, projects_dir: Option<PathBuf>) 
 
     loop {
         let status = match anthropic_oauth::fetch_official_usage() {
-            Ok(window) => UsageStatus::ActiveOfficial {
-                percent: window.percent,
-                resets_at: window.resets_at,
+            Ok(usage) => UsageStatus::ActiveOfficial {
+                percent: usage.five_hour.percent,
+                resets_at: usage.five_hour.resets_at,
+                weekly_percent: usage.seven_day.map(|w| w.percent),
+                weekly_resets_at: usage.seven_day.and_then(|w| w.resets_at),
             },
             Err(err) => {
                 log::debug!("uso oficial indisponível, caindo pra estimativa local: {err}");

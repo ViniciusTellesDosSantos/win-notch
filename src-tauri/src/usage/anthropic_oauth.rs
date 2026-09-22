@@ -1,6 +1,6 @@
-//! Fetches the *official* Claude Code plan-usage percentage by reading the OAuth
-//! credentials the `claude` CLI already maintains locally and calling the same endpoint
-//! `claude`'s own `/usage` command uses. This endpoint isn't publicly documented by
+//! Fetches the *official* Claude Code plan-usage percentages (5h and 7d windows) by reading
+//! the OAuth credentials the `claude` CLI already maintains locally and calling the same
+//! endpoint `claude`'s own `/usage` command uses. This endpoint isn't publicly documented by
 //! Anthropic, but the request shape here (path, headers, response fields) is confirmed
 //! against two independent open-source implementations that read it the same way:
 //! [codenotch](https://github.com/vinzdg/codenotch) and
@@ -64,39 +64,58 @@ pub fn read_credentials() -> Option<OauthCredentials> {
 #[derive(Debug, Deserialize, Default)]
 struct UsageResponse {
     #[serde(default)]
-    five_hour: Option<Window>,
+    five_hour: Option<RawWindow>,
+    #[serde(default)]
+    seven_day: Option<RawWindow>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Window {
+struct RawWindow {
     utilization: f64,
     #[serde(default)]
     resets_at: Option<String>,
 }
 
-pub struct FiveHourWindow {
+#[derive(Debug, Clone, Copy)]
+pub struct PercentWindow {
     pub percent: f64,
     pub resets_at: Option<DateTime<Utc>>,
 }
 
-fn parse_usage_response(body: &str) -> Result<FiveHourWindow, String> {
-    let parsed: UsageResponse =
-        serde_json::from_str(body).map_err(|e| format!("resposta inesperada: {e}"))?;
-    let window = parsed.five_hour.ok_or("resposta sem o campo five_hour")?;
-    let resets_at = window
+/// Both usage windows the endpoint reports. `seven_day` is `None` if the response simply
+/// didn't include it (older API versions, a plan without weekly limits, etc) — that's not
+/// treated as a failure, since `five_hour` is the information the rest of the app actually
+/// depends on.
+pub struct OfficialUsage {
+    pub five_hour: PercentWindow,
+    pub seven_day: Option<PercentWindow>,
+}
+
+fn to_percent_window(raw: RawWindow) -> PercentWindow {
+    let resets_at = raw
         .resets_at
         .as_deref()
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc));
-
-    Ok(FiveHourWindow {
-        percent: window.utilization.clamp(0.0, 100.0),
+    PercentWindow {
+        percent: raw.utilization.clamp(0.0, 100.0),
         resets_at,
+    }
+}
+
+fn parse_usage_response(body: &str) -> Result<OfficialUsage, String> {
+    let parsed: UsageResponse =
+        serde_json::from_str(body).map_err(|e| format!("resposta inesperada: {e}"))?;
+    let five_hour = parsed.five_hour.ok_or("resposta sem o campo five_hour")?;
+
+    Ok(OfficialUsage {
+        five_hour: to_percent_window(five_hour),
+        seven_day: parsed.seven_day.map(to_percent_window),
     })
 }
 
 #[cfg(windows)]
-pub fn fetch_official_usage() -> Result<FiveHourWindow, String> {
+pub fn fetch_official_usage() -> Result<OfficialUsage, String> {
     let creds = read_credentials().ok_or("credenciais do Claude Code não encontradas")?;
     if creds.is_expired(Utc::now()) {
         return Err("token OAuth expirado".to_string());
@@ -117,7 +136,7 @@ pub fn fetch_official_usage() -> Result<FiveHourWindow, String> {
 }
 
 #[cfg(not(windows))]
-pub fn fetch_official_usage() -> Result<FiveHourWindow, String> {
+pub fn fetch_official_usage() -> Result<OfficialUsage, String> {
     Err("uso oficial só é buscado no Windows".to_string())
 }
 
@@ -156,10 +175,10 @@ mod tests {
 
     #[test]
     fn parses_five_hour_utilization_and_reset() {
-        let body = r#"{"five_hour":{"utilization":42,"resets_at":"2025-01-01T12:00:00Z"},"seven_day":{"utilization":10}}"#;
-        let window = parse_usage_response(body).unwrap();
-        assert_eq!(window.percent, 42.0);
-        assert!(window.resets_at.is_some());
+        let body = r#"{"five_hour":{"utilization":42,"resets_at":"2025-01-01T12:00:00Z"}}"#;
+        let usage = parse_usage_response(body).unwrap();
+        assert_eq!(usage.five_hour.percent, 42.0);
+        assert!(usage.five_hour.resets_at.is_some());
     }
 
     #[test]
@@ -171,15 +190,31 @@ mod tests {
     #[test]
     fn percent_is_clamped_to_valid_range() {
         let body = r#"{"five_hour":{"utilization":142}}"#;
-        let window = parse_usage_response(body).unwrap();
-        assert_eq!(window.percent, 100.0);
+        let usage = parse_usage_response(body).unwrap();
+        assert_eq!(usage.five_hour.percent, 100.0);
     }
 
     #[test]
     fn missing_resets_at_still_parses() {
         let body = r#"{"five_hour":{"utilization":7}}"#;
-        let window = parse_usage_response(body).unwrap();
-        assert_eq!(window.percent, 7.0);
-        assert!(window.resets_at.is_none());
+        let usage = parse_usage_response(body).unwrap();
+        assert_eq!(usage.five_hour.percent, 7.0);
+        assert!(usage.five_hour.resets_at.is_none());
+    }
+
+    #[test]
+    fn parses_seven_day_alongside_five_hour() {
+        let body = r#"{"five_hour":{"utilization":42},"seven_day":{"utilization":12,"resets_at":"2025-01-08T00:00:00Z"}}"#;
+        let usage = parse_usage_response(body).unwrap();
+        let weekly = usage.seven_day.expect("seven_day should be present");
+        assert_eq!(weekly.percent, 12.0);
+        assert!(weekly.resets_at.is_some());
+    }
+
+    #[test]
+    fn missing_seven_day_is_none_not_an_error() {
+        let body = r#"{"five_hour":{"utilization":42}}"#;
+        let usage = parse_usage_response(body).unwrap();
+        assert!(usage.seven_day.is_none());
     }
 }
