@@ -78,6 +78,8 @@ gera um `win-notch.exe` de verdade em `target/x86_64-pc-windows-gnu/release/`, s
 
 Isso NÃO gera o instalador (`cargo tauri build` cuida disso e precisa de ferramental específico de Windows tipo NSIS/WiX) — só o `.exe` bruto, suficiente pra testar o app.
 
+**Importante**: diferente da versão egui anterior (binário único), esse `.exe` **não é autocontido** — ele carrega `WebView2Loader.dll` em tempo de execução (é assim que o Tauri fala com o WebView2 do Windows). O build já deixa esse arquivo pronto do lado do `.exe`, em `target/x86_64-pc-windows-gnu/release/WebView2Loader.dll` — **os dois arquivos precisam estar na mesma pasta** para o `.exe` abrir. Sem o `.dll` ali do lado, o Windows recusa abrir o processo com o erro genérico "O aplicativo não pôde ser inicializado corretamente (0xc000007b)". Rodar `cargo tauri build` de verdade (com as ferramentas de instalador do Windows) resolveria isso automaticamente empacotando tudo junto.
+
 ## Limitações conhecidas desta v1
 
 - **Multi-monitor**: o cálculo de borda/snap usa o monitor atual da janela; um monitor secundário com posição/escala muito diferente da primária pode se comportar de forma menos precisa. Candidato a melhoria futura.
