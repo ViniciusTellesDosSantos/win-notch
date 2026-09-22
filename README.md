@@ -91,7 +91,7 @@ Coisas que ficaram de fora de propósito:
 - **Sem renovação de token (refresh)**: se `expiresAt` já passou, a chamada nem é tentada — trata como indisponível e cai no fallback. Implementar o fluxo de OAuth refresh às cegas, sem poder testar, era arriscado de mais pra pouco ganho (o próprio `claude` CLI já renova o token sozinho sempre que o usuário usa normalmente).
 - **Fallback automático**: se a fonte oficial falhar por qualquer motivo, o notch mostra a estimativa derivada dos JSONL locais (o que já existia antes) em vez de simplesmente "indisponível" — ver `usage/claude_code.rs`.
 
-Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `%`), o próximo passo de diagnóstico é checar se `%USERPROFILE%\.claude\.credentials.json` existe e se a chamada à API está retornando erro — nada disso pode ser depurado a partir daqui, só numa máquina Windows real.
+Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `%`), a linha pequena "(debug: ...)" que aparece embaixo da estimativa mostra o motivo exato — não precisa mais adivinhar. A primeira tentativa caiu 100% das vezes por um bug real: `ureq = { features = ["rustls"] }` habilitava o nome da dependência opcional interna, não a feature `"tls"` de verdade (que é quem liga o conector TLS do `ureq` — confirmado lendo o código-fonte do crate), então o cliente HTTP foi compilado sem suporte a HTTPS nenhum. Corrigido trocando pra `features = ["tls"]`.
 
 ## Limitações conhecidas desta v1
 

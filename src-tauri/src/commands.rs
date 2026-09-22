@@ -21,6 +21,9 @@ pub struct ScreenshotResult {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UsageDto {
     pub status: &'static str,
+    /// For `"unavailable"`, why. For `"active"` (the token-count fallback), why the
+    /// official percentage wasn't used instead — surfaced so a failure here is ever
+    /// diagnosable without a console, which release builds don't have.
     pub reason: Option<String>,
     /// Official percentage of the 5h plan limit used (only set for `"active_official"`).
     pub percent: Option<f64>,
@@ -76,9 +79,10 @@ pub fn get_usage(state: State<UsageWatcher>) -> UsageDto {
             tokens,
             started_at,
             resets_at,
+            official_error,
         } => UsageDto {
             status: "active",
-            reason: None,
+            reason: Some(official_error),
             percent: None,
             tokens: Some(tokens),
             started_at: Some(started_at.to_rfc3339()),

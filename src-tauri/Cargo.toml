@@ -35,10 +35,14 @@ env_logger = "0.11"
 auto-launch = "0.5"
 arboard = "3"
 xcap = "0.0.14"
-# rustls instead of the default native-tls backend: pure-Rust TLS, no OpenSSL to link
-# against — matters here because that linking is painful/unreliable when cross-compiling
-# with mingw-w64 rather than building on a real Windows host.
-ureq = { version = "2", default-features = false, features = ["rustls"] }
+# "tls" (not the bare "rustls" dependency name!) is the feature that actually wires up
+# ureq's TLS connector — it pulls in rustls + webpki-roots (a bundled root CA list, no
+# OpenSSL to link against, which matters when cross-compiling with mingw-w64 rather than
+# building on a real Windows host). Enabling just "rustls" compiles, since Cargo lets you
+# enable an optional dependency by name as if it were a feature, but ureq's own TLS
+# connector code is gated behind #[cfg(feature = "tls")] specifically — so that silently
+# built an HTTP client with no HTTPS support at all, and every request failed.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [profile.release]
 opt-level = "s"

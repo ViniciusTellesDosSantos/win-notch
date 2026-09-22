@@ -20,11 +20,14 @@ pub enum UsageStatus {
         resets_at: Option<DateTime<Utc>>,
     },
     /// There's an active 5h usage window with `tokens` consumed so far. Fallback used when
-    /// the official source (`anthropic_oauth`) isn't available for any reason.
+    /// the official source (`anthropic_oauth`) isn't available for any reason — `official_error`
+    /// carries that reason so it's visible somewhere (the app has no console in release
+    /// builds, so a log line alone is not enough to ever debug this from the field).
     Active {
         tokens: u64,
         started_at: DateTime<Utc>,
         resets_at: DateTime<Utc>,
+        official_error: String,
     },
     /// No active window right now (no recent activity, or the last window expired).
     Idle,
@@ -86,7 +89,7 @@ fn run_loop(snapshot: Arc<Mutex<UsageSnapshot>>, projects_dir: Option<PathBuf>) 
             },
             Err(err) => {
                 log::debug!("uso oficial indisponível, caindo pra estimativa local: {err}");
-                fallback_status(&dir)
+                fallback_status(&dir, err)
             }
         };
 
@@ -96,9 +99,10 @@ fn run_loop(snapshot: Arc<Mutex<UsageSnapshot>>, projects_dir: Option<PathBuf>) 
 }
 
 /// The JSONL-derived estimate used whenever the official source (`anthropic_oauth`) isn't
-/// available — see the module docs on `anthropic_oauth` for why that's expected to happen
-/// at least some of the time (no refresh-token handling, network issues, etc).
-fn fallback_status(dir: &std::path::Path) -> UsageStatus {
+/// available — `official_error` is why it wasn't, carried through so `Active` can surface it
+/// (see the module docs on `anthropic_oauth` for why that's expected to happen at least some
+/// of the time: no refresh-token handling, network issues, etc).
+fn fallback_status(dir: &std::path::Path, official_error: String) -> UsageStatus {
     if !dir.is_dir() {
         return UsageStatus::Unavailable(
             "Claude Code ainda não gerou dados locais nesta máquina".into(),
@@ -111,6 +115,7 @@ fn fallback_status(dir: &std::path::Path) -> UsageStatus {
             tokens: block.tokens,
             started_at: block.started_at,
             resets_at: block.resets_at(),
+            official_error,
         },
         None => UsageStatus::Idle,
     }

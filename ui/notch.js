@@ -253,6 +253,11 @@
         const remainingMs = new Date(dto.resets_at).getTime() - Date.now();
         usageSecondary.textContent = `reinicia em ${formatDuration(remainingMs)}`;
         usageFootnote.textContent = "Estimativa derivada dos logs locais, não é o limite oficial do plano.";
+        if (dto.reason) {
+          // Why the official percentage wasn't used instead — there's no console in a
+          // release build, so this is the only place a failure here is ever visible.
+          usageFootnote.textContent += ` (debug: ${dto.reason})`;
+        }
 
         const elapsedFraction = Math.min(Math.max(1 - remainingMs / USAGE_WINDOW_MS, 0), 1);
         ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - elapsedFraction));
