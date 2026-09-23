@@ -7,9 +7,8 @@
 
   // Sizes and all the position/drag math below are in *logical* pixels throughout, so the
   // notch looks the same real-world size on a 100% and a 150%/200% scaled Windows display.
-  // Monitor geometry and window-move events from Tauri are physical, so they're converted
-  // via the monitor's scaleFactor at the one place each is read (toLogicalMonitor,
-  // onDragSettled) — everything past that boundary stays logical.
+  // Monitor geometry from Tauri is physical, so it's converted via the monitor's
+  // scaleFactor in logicalMonitor() — everything past that boundary stays logical.
   // COLLAPSED_SIZE is kept in sync by hand with COLLAPSED_SIZE in src-tauri/src/config.rs.
   const COLLAPSED_SIZE = { width: 32, height: 32 };
   const EXPANDED_SIZE = { width: 340, height: 232 };
@@ -44,9 +43,15 @@
   let isDragging = false;
   let expandTimer = null;
   let collapseTimer = null;
-  let dragSettleTimer = null;
   let collapseResizeTimer = null;
   let lastUsageDto = null;
+
+  // Manual, pointer-capture-driven drag state (see the pointerdown handler below for why
+  // this replaces Tauri's native startDragging()).
+  let dragOrigin = null;
+  let dragCurrentPos = null;
+  let dragStartScreen = null;
+  let dragFrame = null;
 
   // tauri.conf.json's alwaysOnTop only sets Windows' topmost flag once, at window
   // creation. That flag isn't a single fixed layer, though — it's a band shared with every
@@ -102,10 +107,11 @@
 
   async function moveAndResize(size) {
     const monitor = await logicalMonitor();
-    if (!monitor) return;
+    if (!monitor) return null;
     const pos = computeWindowRect(monitor, size);
     await appWindow.setSize(new LogicalSize(size.width, size.height));
     await appWindow.setPosition(new LogicalPosition(pos.x, pos.y));
+    return pos;
   }
 
   async function expand() {
@@ -143,7 +149,11 @@
   notchEl.addEventListener("mouseenter", () => {
     clearTimeout(collapseTimer);
     collapseTimer = null;
-    if (isExpanded || expandTimer) return;
+    // Pointer capture (see the drag handlers below) should already keep the pointer
+    // "inside" notchEl for the whole drag per spec, so this shouldn't normally be
+    // reachable while dragging — kept as a defensive guard since that behavior can't be
+    // verified without a real Windows/WebView2 install.
+    if (isExpanded || expandTimer || isDragging) return;
     expandTimer = setTimeout(expand, HOVER_EXPAND_DELAY);
   });
 
@@ -156,12 +166,24 @@
 
   // --- Drag to reposition + edge snap -------------------------------------------------
 
+  // This drags the window manually (Pointer Events + setPointerCapture) instead of using
+  // Tauri's native appWindow.startDragging(). On Windows, startDragging() just posts
+  // WM_NCLBUTTONDOWN and returns immediately — the actual move happens entirely inside
+  // Windows' own modal SC_MOVE loop, which only ends when the mouse is released, and
+  // there's no JS-exposed event for that ("onMoved" only fires per actual movement, so
+  // pausing mid-drag while still holding the button — completely normal — looks
+  // indistinguishable from "drag finished" to anything watching for silence on it). Driving
+  // the drag ourselves trades a little native smoothness for a real, unambiguous end
+  // signal: pointerup. setPointerCapture keeps pointermove/pointerup targeted at notchEl
+  // for the rest of the gesture even as the window moves out from under the cursor between
+  // frames — the same mechanism used by web drag-and-drop for exactly this problem.
+  //
   // Listens on the whole notch (not just #pill): hovering for HOVER_EXPAND_DELAY (120ms)
   // before the user manages to press the button is the common case, not the exception, so
-  // by the time mousedown would fire on #pill it's usually already hidden behind the
+  // by the time pointerdown would fire on #pill it's usually already hidden behind the
   // expanded panel (pointer-events: none). Dragging from the panel background works too;
   // only the capture button opts out, so it can still be clicked normally.
-  notchEl.addEventListener("mousedown", async (event) => {
+  notchEl.addEventListener("pointerdown", async (event) => {
     if (event.button !== 0 || event.target.closest("#capture-btn")) return;
     clearTimeout(expandTimer);
     expandTimer = null;
@@ -172,33 +194,58 @@
     clearTimeout(collapseResizeTimer);
     collapseResizeTimer = null;
 
-    // Drag math (here and in onDragSettled) assumes the window's physical footprint is
-    // COLLAPSED_SIZE throughout — force that *before* the native drag starts rather than
-    // only after, so a drag begun from the expanded panel doesn't run with mismatched size.
+    const monitor = await logicalMonitor();
+    if (!monitor) return;
+
+    // Drag math (here and in onDragSettled) assumes the window's logical footprint is
+    // COLLAPSED_SIZE throughout — force that *before* the drag starts rather than only
+    // after, so a drag begun from the expanded panel doesn't run with mismatched size.
     if (isExpanded) {
       isExpanded = false;
       notchEl.classList.remove("expanded");
       await moveAndResize(COLLAPSED_SIZE);
     }
 
+    dragOrigin = computeWindowRect(monitor, COLLAPSED_SIZE);
+    dragCurrentPos = { ...dragOrigin };
+    dragStartScreen = { x: event.screenX, y: event.screenY };
     isDragging = true;
-    await appWindow.startDragging();
+    notchEl.setPointerCapture(event.pointerId);
   });
 
-  appWindow.onMoved(({ payload: position }) => {
+  notchEl.addEventListener("pointermove", (event) => {
     if (!isDragging) return;
-    clearTimeout(dragSettleTimer);
-    dragSettleTimer = setTimeout(() => onDragSettled(position), 150);
+    dragCurrentPos = {
+      x: dragOrigin.x + (event.screenX - dragStartScreen.x),
+      y: dragOrigin.y + (event.screenY - dragStartScreen.y),
+    };
+    // Coalesce to at most one setPosition call per frame instead of one per pointermove
+    // (which can fire far faster than the window can actually move via IPC).
+    if (dragFrame) return;
+    dragFrame = requestAnimationFrame(() => {
+      dragFrame = null;
+      if (!isDragging || !dragCurrentPos) return;
+      appWindow.setPosition(new LogicalPosition(dragCurrentPos.x, dragCurrentPos.y)).catch(() => {});
+    });
   });
 
-  async function onDragSettled(physicalPosition) {
+  async function endDrag(event) {
+    if (!isDragging) return;
     isDragging = false;
+    notchEl.releasePointerCapture(event.pointerId);
+    if (dragFrame) {
+      cancelAnimationFrame(dragFrame);
+      dragFrame = null;
+    }
+    await onDragSettled(dragCurrentPos ?? dragOrigin);
+  }
+  notchEl.addEventListener("pointerup", endDrag);
+  notchEl.addEventListener("pointercancel", endDrag);
+
+  async function onDragSettled(position) {
     const monitor = await logicalMonitor();
     if (!monitor) return;
 
-    // `onMoved` reports physical pixels (it mirrors the OS window manager); convert to
-    // logical so it lines up with `monitor` and every other value in this file.
-    const position = { x: physicalPosition.x / monitor.scale, y: physicalPosition.y / monitor.scale };
     const size = COLLAPSED_SIZE;
 
     const distTop = Math.abs(position.y - monitor.y);
