@@ -15,6 +15,9 @@
   const EXPANDED_SIZE = { width: 340, height: 232 };
   const HOVER_EXPAND_DELAY = 120;
   const HOVER_COLLAPSE_DELAY = 350;
+  // Matches the width/height transition duration in notch.css — used to time the real OS
+  // window resize on collapse (see collapse()'s comment for why this can't be transitionend).
+  const COLLAPSE_RESIZE_DELAY_MS = 170;
   const SNAP_MARGIN = 48; // logical px
   const USAGE_POLL_MS = 8000;
   const USAGE_WINDOW_MS = 5 * 60 * 60 * 1000;
@@ -42,6 +45,7 @@
   let expandTimer = null;
   let collapseTimer = null;
   let dragSettleTimer = null;
+  let collapseResizeTimer = null;
   let lastUsageDto = null;
 
   // tauri.conf.json's alwaysOnTop only sets Windows' topmost flag once, at window
@@ -106,6 +110,11 @@
 
   async function expand() {
     expandTimer = null;
+    // A collapse may still be waiting to shrink the real OS window back down (see
+    // collapse()) — cancel it, or it'd shrink the window out from under the panel a
+    // moment after the user re-entered.
+    clearTimeout(collapseResizeTimer);
+    collapseResizeTimer = null;
     if (isExpanded) return;
     isExpanded = true;
     await moveAndResize(EXPANDED_SIZE);
@@ -113,16 +122,22 @@
     refreshUsage();
   }
 
+  // Shrinking the real OS window back to COLLAPSED_SIZE is what stops it from swallowing
+  // clicks meant for whatever's underneath, so it can't depend on an event that isn't
+  // guaranteed to fire: if the mouse re-enters before the CSS shrink transition finishes,
+  // that transition gets cancelled/reversed and "transitionend" never fires for it (or
+  // fires for the wrong direction) — the window would stay stuck at EXPANDED_SIZE,
+  // invisibly blocking clicks near the notch. A plain timer matching the transition's
+  // duration always fires, same as every other timer in this file.
   function collapse() {
     if (!isExpanded || isDragging) return;
     isExpanded = false;
     notchEl.classList.remove("expanded");
-    notchEl.addEventListener("transitionend", onCollapseTransitionEnd, { once: true });
-  }
-
-  async function onCollapseTransitionEnd(event) {
-    if (event.propertyName !== "width") return;
-    await moveAndResize(COLLAPSED_SIZE);
+    clearTimeout(collapseResizeTimer);
+    collapseResizeTimer = setTimeout(() => {
+      collapseResizeTimer = null;
+      moveAndResize(COLLAPSED_SIZE);
+    }, COLLAPSE_RESIZE_DELAY_MS);
   }
 
   notchEl.addEventListener("mouseenter", () => {
@@ -152,6 +167,10 @@
     expandTimer = null;
     clearTimeout(collapseTimer);
     collapseTimer = null;
+    // A stale resize from a still-pending collapse must not land mid-drag or right after
+    // settling — it would reposition the window using an outdated edge/offsetCenter.
+    clearTimeout(collapseResizeTimer);
+    collapseResizeTimer = null;
 
     // Drag math (here and in onDragSettled) assumes the window's physical footprint is
     // COLLAPSED_SIZE throughout — force that *before* the native drag starts rather than
