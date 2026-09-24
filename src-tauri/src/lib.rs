@@ -17,6 +17,17 @@ pub fn run() {
     env_logger::init();
 
     tauri::Builder::default()
+        // Must be registered first: on Windows this needs to be able to hand off to an
+        // already-running instance and exit before any other plugin/setup work happens.
+        // Without it, nothing stops the app from being launched twice — two "notch" windows
+        // fighting over the same screen edge, two tray icons, two threads racing to read the
+        // same OAuth credentials file and overwrite the same saved position.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("notch") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .setup(|app| {
             let settings = Settings::load();
             let usage = UsageWatcher::spawn(usage::claude_code::default_projects_dir());
