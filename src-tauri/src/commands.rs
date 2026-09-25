@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::config::{Edge, Settings};
 use crate::usage::{UsageStatus, UsageWatcher};
-use crate::{autostart, captures, screenshot};
+use crate::{autostart, captures, screenshot, updater};
 
 pub struct SettingsState(pub Mutex<Settings>);
 
@@ -239,4 +239,16 @@ pub fn cancel_selection(app: AppHandle) -> Result<(), String> {
         },
     );
     outcome
+}
+
+/// Version of the update waiting to be installed, if any — for the popover to show its
+/// "Atualizar" button on load, not only when the next check's event arrives.
+#[tauri::command]
+pub fn update_status(state: State<updater::UpdateState>) -> Option<String> {
+    state.0.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
 }

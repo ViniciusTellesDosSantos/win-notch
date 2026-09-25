@@ -1,3 +1,6 @@
 /target
 /src-tauri/target
 /src-tauri/gen
+# Updater signing keys — the private one lives only in the TAURI_SIGNING_PRIVATE_KEY secret.
+*.key
+*.key.pub

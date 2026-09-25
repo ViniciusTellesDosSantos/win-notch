@@ -27,8 +27,24 @@ pub fn setup(app: &App) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
+    let update_item = MenuItem::with_id(
+        app,
+        "update",
+        crate::updater::idle_label(app.handle()),
+        true,
+        None::<&str>,
+    )?;
+    app.manage(crate::updater::UpdateMenuItem(update_item.clone()));
     let quit_item = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&autostart_item, &reset_position_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &autostart_item,
+            &reset_position_item,
+            &update_item,
+            &quit_item,
+        ],
+    )?;
 
     let icon = app
         .default_window_icon()
@@ -57,6 +73,23 @@ pub fn setup(app: &App) -> tauri::Result<()> {
             "reset_position" => {
                 let state = app.state::<SettingsState>();
                 crate::reset_notch_position(app, &state);
+            }
+            "update" => {
+                // Installs if a check already found something, otherwise checks now.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let pending = app
+                        .state::<crate::updater::UpdateState>()
+                        .0
+                        .lock()
+                        .unwrap()
+                        .is_some();
+                    let _ = if pending {
+                        crate::updater::install(&app).await
+                    } else {
+                        crate::updater::check(&app).await.map(|_| ())
+                    };
+                });
             }
             "quit" => app.exit(0),
             _ => {}

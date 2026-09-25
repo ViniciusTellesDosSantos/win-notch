@@ -41,11 +41,20 @@ A primeira versão deste app era 100% Rust com `egui`/`eframe`. Visualmente fico
         │   └── claude_code.rs      # fallback: parsing dos JSONL e cálculo da janela de 5h
         ├── screenshot.rs        # captura de monitores (xcap) + crop + clipboard (arboard)
         ├── captures.rs          # capturas salvas: PNG em Imagens\win-notch, lista recente + miniaturas
+        ├── updater.rs           # atualização automática pelos GitHub Releases
         ├── tray.rs              # ícone na bandeja (API nativa do Tauri) e menu
         └── autostart.rs         # toggle "iniciar com o Windows"
 ```
 
 Toda a geometria (pílula ancorada numa borda, crescendo a partir do centro em vez de "pular" ao expandir, snap de borda ao arrastar) é calculada em pixels **lógicos** tanto no Rust (`config.rs`, usado na posição inicial) quanto no JS (`notch.js`, usado durante hover/drag), convertendo a partir da geometria física do monitor via `scaleFactor` — assim o notch fica do mesmo tamanho relativo em telas com escalas diferentes (100%/125%/150%, muito comuns no Windows).
+
+## Instalação e atualizações
+
+**Primeira instalação:** baixe o `win-notch_X.Y.Z_x64-setup.exe` do [último Release](https://github.com/ViniciusTellesDosSantos/win-notch/releases/latest) e rode. Ele instala por usuário (sem pedir administrador), cria o atalho no menu Iniciar e não precisa de nenhuma `.dll` separada. Como o instalador não tem certificado de assinatura de código pago, o Windows pode mostrar "O Windows protegeu o computador" na primeira vez: **Mais informações → Executar assim mesmo**.
+
+**Atualizações:** automáticas. O app confere o último Release ~30s depois de abrir e a cada 6h (ou na hora, pelo item "Procurar atualizações" da bandeja). Quando há versão nova, aparece um ícone verde de download no cabeçalho do balão e o item da bandeja vira "Atualizar para vX.Y.Z"; um clique baixa, confere a assinatura, instala (só uma barra de progresso) e reabre o app já atualizado. Configurações, posição e capturas ficam onde estão.
+
+**Publicando uma versão** (fluxo do desenvolvedor): subir `version` em `src-tauri/tauri.conf.json` e `src-tauri/Cargo.toml`, commitar e dar push de uma tag igual (`git tag v0.3.0 && git push origin v0.3.0`). O workflow `.github/workflows/release.yml` compila no Windows (MSVC), gera o instalador NSIS, assina o pacote de atualização com a chave do secret `TAURI_SIGNING_PRIVATE_KEY` e publica o Release com o `latest.json` que o app lê. A chave pública fica em `tauri.conf.json` (`plugins.updater.pubkey`); o app recusa qualquer atualização que não tenha sido assinada pela chave privada correspondente.
 
 ## Rodando no Windows
 
@@ -55,7 +64,7 @@ Pré-requisitos: [Rust via rustup](https://rustup.rs) + Build Tools do Visual St
 cargo install tauri-cli --version "^2.0" --locked
 cd src-tauri
 cargo tauri dev      # roda em modo desenvolvimento
-cargo tauri build    # gera o instalador (.exe/.msi) em target/release/bundle
+cargo tauri build    # gera o instalador NSIS em target/release/bundle (o CI faz isso a cada tag de versão)
 ```
 
 Ou, sem o `tauri-cli`, só para rodar o binário puro sem empacotar instalador:

@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod screenshot;
 mod tray;
+mod updater;
 mod usage;
 
 use std::sync::Mutex;
@@ -29,6 +30,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let settings = Settings::load();
             let usage = UsageWatcher::spawn(usage::claude_code::default_projects_dir());
@@ -41,11 +43,22 @@ pub fn run() {
                 let _ = window.show();
             }
 
+            // Autostart stores the exe's path at the moment it's turned on. Re-register it
+            // every launch so it follows the app when it moves — like going from a loose .exe
+            // to the installed one, or the installer putting a new version somewhere else.
+            if settings.start_with_windows {
+                if let Err(err) = autostart::set_enabled(true) {
+                    log::warn!("falha ao atualizar o registro de autostart: {err}");
+                }
+            }
+
             app.manage(SettingsState(Mutex::new(settings)));
             app.manage(usage);
             app.manage(PendingCapture::default());
+            app.manage(updater::UpdateState::default());
 
             tray::setup(app)?;
+            updater::spawn_periodic_check(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -60,6 +73,8 @@ pub fn run() {
             commands::list_captures,
             commands::copy_capture,
             commands::open_captures_folder,
+            commands::update_status,
+            commands::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -25,6 +25,7 @@
   const captureBtn = document.getElementById("capture-btn");
   const captureList = document.getElementById("capture-list");
   const openFolderBtn = document.getElementById("open-folder");
+  const updateBtn = document.getElementById("update-btn");
 
   let lastUsageDto = null;
   let captureNote = null;
@@ -211,6 +212,33 @@
   openFolderBtn.addEventListener("click", () => {
     invoke("open_captures_folder").catch((err) => showCaptureNote(`Erro: ${err}`));
   });
+
+  // --- Updates -----------------------------------------------------------------------
+
+  function showUpdate(version) {
+    if (!version) return;
+    updateBtn.hidden = false;
+    updateBtn.disabled = false;
+    updateBtn.title = `Atualizar para a versão ${version}`;
+  }
+
+  updateBtn.addEventListener("click", async () => {
+    updateBtn.disabled = true;
+    updateBtn.title = "Baixando atualização…";
+    showCaptureNote("Baixando atualização…");
+    try {
+      // On success the app exits and the installer reopens the new version, so this
+      // only comes back if something went wrong.
+      await invoke("install_update");
+    } catch (err) {
+      updateBtn.disabled = false;
+      updateBtn.title = "Tentar atualizar de novo";
+      showCaptureNote(`Erro ao atualizar: ${err}`);
+    }
+  });
+
+  listen("update-available", (event) => showUpdate(event.payload?.version));
+  invoke("update_status").then(showUpdate, () => {});
 
   refreshUsage();
   refreshCaptures();

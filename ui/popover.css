@@ -97,8 +97,53 @@
 }
 #popover-title {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 15px;
   font-weight: 600;
+}
+
+/* Only shown when a newer version is available (see popover.js). */
+#update-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(52, 199, 89, 0.18);
+  color: var(--ok);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+#update-btn:hover {
+  background: rgba(52, 199, 89, 0.32);
+}
+#update-btn:disabled {
+  cursor: default;
+  animation: update-pulse 900ms ease-in-out infinite alternate;
+}
+#update-btn[hidden] {
+  display: none;
+}
+#update-btn svg {
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@keyframes update-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.4;
+  }
 }
 
 #capture-btn {

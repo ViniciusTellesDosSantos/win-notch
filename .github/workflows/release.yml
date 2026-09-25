@@ -1,0 +1,47 @@
+# Builds the Windows installer and publishes a GitHub Release whenever a version tag
+# (v0.2.0, v0.3.1, ...) is pushed. The release also carries latest.json + the installer's
+# signature, which is what the app's auto-updater (tauri-plugin-updater) reads.
+#
+# Needs one repository secret: TAURI_SIGNING_PRIVATE_KEY (the updater signing key; its
+# public half is in src-tauri/tauri.conf.json under plugins.updater.pubkey). The tag must
+# match "version" in tauri.conf.json.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tauriScript: cargo tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: win-notch ${{ github.ref_name }}
+          releaseBody: >-
+            Primeira instalação: baixe e rode o `win-notch_*_x64-setup.exe` abaixo.
+            Quem já tem o app instalado recebe esta versão pela atualização automática.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

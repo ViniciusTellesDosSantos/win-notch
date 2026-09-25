@@ -1,6 +1,6 @@
 [package]
 name = "win-notch"
-version = "0.1.0"
+version = "0.2.0"
 description = "Overlay estilo notch para Windows: uso do Claude Code e captura de tela rápida."
 edition = "2021"
 
@@ -22,6 +22,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
