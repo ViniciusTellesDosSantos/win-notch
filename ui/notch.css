@@ -1,6 +1,6 @@
-/* Geometry here is kept in sync by hand with sizesFor() in notch.js (and collapsed_size()
-   in src-tauri/src/config.rs): tab body 64x100 (left/right) or 108x56 (top/bottom), plus
-   a 14px concave corner on each side along the edge; popover 280x188, 12px from the tab. */
+/* The tab's window is exactly the tab: body 64x100 (left/right) or 108x56 (top/bottom),
+   plus a 14px concave corner on each side along the edge — kept in sync by hand with
+   collapsedSize() in notch.js and collapsed_size() in src-tauri/src/config.rs. */
 
 #notch {
   position: absolute;
@@ -45,7 +45,7 @@
 
 #notch.edge-left #tab,
 #notch.edge-right #tab {
-  top: calc(var(--tab-offset, 0px) + 14px);
+  top: 14px;
   width: 64px;
   height: 100px;
   flex-direction: column;
@@ -82,7 +82,7 @@
 
 #notch.edge-top #tab,
 #notch.edge-bottom #tab {
-  left: calc(var(--tab-offset, 0px) + 14px);
+  left: 14px;
   width: 108px;
   height: 56px;
   flex-direction: row;
@@ -146,176 +146,4 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
   white-space: nowrap;
-}
-
-/* --- Popover -------------------------------------------------------------------------- */
-
-#popover {
-  position: absolute;
-  width: 280px;
-  height: 188px;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  border-radius: 18px;
-  opacity: 0;
-  transform: scale(0.96);
-  pointer-events: none;
-  transition:
-    opacity 170ms ease,
-    transform 170ms cubic-bezier(0.22, 0.9, 0.3, 1);
-}
-#notch.expanded #popover {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-}
-
-#notch.edge-right #popover {
-  right: 76px;
-  top: 0;
-  transform-origin: right center;
-}
-#notch.edge-left #popover {
-  left: 76px;
-  top: 0;
-  transform-origin: left center;
-}
-#notch.edge-top #popover {
-  top: 68px;
-  left: 0;
-  transform-origin: center top;
-}
-#notch.edge-bottom #popover {
-  bottom: 68px;
-  left: 0;
-  transform-origin: center bottom;
-}
-
-/* Pointer toward the tab; --tail-offset is the tab's center along the edge (notch.js). */
-#popover::after {
-  content: "";
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  background: var(--bg);
-  border-radius: 2px;
-  transform: rotate(45deg);
-}
-#notch.edge-right #popover::after {
-  right: -6px;
-  top: calc(var(--tail-offset, 50%) - 7px);
-}
-#notch.edge-left #popover::after {
-  left: -6px;
-  top: calc(var(--tail-offset, 50%) - 7px);
-}
-#notch.edge-top #popover::after {
-  top: -6px;
-  left: calc(var(--tail-offset, 50%) - 7px);
-}
-#notch.edge-bottom #popover::after {
-  bottom: -6px;
-  left: calc(var(--tail-offset, 50%) - 7px);
-}
-
-#popover-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 26px;
-  margin-bottom: 10px;
-}
-.header-spark {
-  flex: none;
-  color: var(--text);
-}
-#popover-title {
-  flex: 1;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-#capture-btn {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text);
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    transform 80ms ease;
-}
-#capture-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-#capture-btn:active {
-  transform: scale(0.94);
-}
-#capture-btn svg {
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-}
-
-.usage-line + .usage-line {
-  margin-top: 8px;
-}
-.usage-line[hidden] {
-  display: none;
-}
-.line-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 5px;
-  font-size: 13px;
-}
-.line-label {
-  font-weight: 500;
-}
-.line-reset {
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.bar {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--track);
-  overflow: hidden;
-}
-.bar-fill {
-  width: 0;
-  height: 100%;
-  border-radius: 4px;
-  background: var(--level);
-  transition:
-    width 400ms ease,
-    background 200ms ease;
-}
-.line-used {
-  margin-top: 5px;
-  font-size: 12.5px;
-}
-
-#usage-footnote {
-  margin: auto 0 0;
-  font-size: 10.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#usage-footnote:empty {
-  display: none;
 }

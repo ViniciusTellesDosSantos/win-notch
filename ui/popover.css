@@ -1,0 +1,185 @@
+/* The popover's own window: the 280x188 balloon plus a 10px margin all around for the
+   pointer, which faces the tab on whichever side the current edge puts it. Kept in sync by
+   hand with POPOVER_WINDOW / POPOVER_MARGIN in notch.js. */
+
+#root {
+  position: absolute;
+  inset: 0;
+  cursor: default;
+}
+
+/* Colors follow usage level (set as data-level by notch.js): green, orange, red — plus
+   "est" for the token-count fallback, where the fill is time elapsed, not plan usage. */
+[data-level="ok"] {
+  --level: var(--ok);
+}
+[data-level="mid"] {
+  --level: var(--mid);
+}
+[data-level="high"] {
+  --level: var(--high);
+}
+[data-level="est"] {
+  --level: var(--text-muted);
+}
+
+#popover {
+  position: absolute;
+  inset: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-radius: 18px;
+  opacity: 0;
+  transform: scale(0.96);
+  pointer-events: none;
+  transition:
+    opacity 170ms ease,
+    transform 170ms cubic-bezier(0.22, 0.9, 0.3, 1);
+}
+#root.open #popover {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+#root.edge-right #popover {
+  transform-origin: right center;
+}
+#root.edge-left #popover {
+  transform-origin: left center;
+}
+#root.edge-top #popover {
+  transform-origin: center top;
+}
+#root.edge-bottom #popover {
+  transform-origin: center bottom;
+}
+
+/* Pointer toward the tab; --tail-offset is the tab's center along the edge (notch.js). */
+#popover::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--bg);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+#root.edge-right #popover::after {
+  right: -6px;
+  top: calc(var(--tail-offset, 50%) - 7px);
+}
+#root.edge-left #popover::after {
+  left: -6px;
+  top: calc(var(--tail-offset, 50%) - 7px);
+}
+#root.edge-top #popover::after {
+  top: -6px;
+  left: calc(var(--tail-offset, 50%) - 7px);
+}
+#root.edge-bottom #popover::after {
+  bottom: -6px;
+  left: calc(var(--tail-offset, 50%) - 7px);
+}
+
+#popover-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  margin-bottom: 10px;
+}
+.header-spark {
+  flex: none;
+  color: var(--text);
+}
+#popover-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#capture-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    transform 80ms ease;
+}
+#capture-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+#capture-btn:active {
+  transform: scale(0.94);
+}
+#capture-btn svg {
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.usage-line + .usage-line {
+  margin-top: 8px;
+}
+.usage-line[hidden] {
+  display: none;
+}
+.line-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 13px;
+}
+.line-label {
+  font-weight: 500;
+}
+.line-reset {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+  overflow: hidden;
+}
+.bar-fill {
+  width: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--level);
+  transition:
+    width 400ms ease,
+    background 200ms ease;
+}
+.line-used {
+  margin-top: 5px;
+  font-size: 12.5px;
+}
+
+#usage-footnote {
+  margin: auto 0 0;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#usage-footnote:empty {
+  display: none;
+}

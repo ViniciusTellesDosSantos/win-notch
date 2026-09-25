@@ -30,6 +30,27 @@
         "shadow": false,
         "visible": false,
         "focus": false
+      },
+      {
+        "label": "popover",
+        "url": "popover.html",
+        "title": "win-notch",
+        "width": 300,
+        "height": 208,
+        "x": -10000,
+        "y": -10000,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": true,
+        "focus": false,
+        "focusable": false
       }
     ],
     "security": {

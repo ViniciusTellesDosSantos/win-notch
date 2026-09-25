@@ -1,7 +1,8 @@
 (() => {
   const { invoke } = window.__TAURI__.core;
-  const { listen } = window.__TAURI__.event;
-  const { getCurrentWindow, LogicalPosition, LogicalSize, currentMonitor } = window.__TAURI__.window;
+  const { listen, emit } = window.__TAURI__.event;
+  const { getCurrentWindow, Window, LogicalPosition, LogicalSize, currentMonitor } = window.__TAURI__.window;
+  const { sessionSummary } = window.UsageFormat;
 
   const appWindow = getCurrentWindow();
 
@@ -10,58 +11,54 @@
   // Monitor geometry from Tauri is physical, so it's converted via the monitor's
   // scaleFactor in logicalMonitor() — everything past that boundary stays logical.
   //
-  // The tab's collapsed sizes (body + a 14px concave corner on each side along the edge)
-  // are kept in sync by hand with collapsed_size() in src-tauri/src/config.rs, and all of
-  // these with the geometry in notch.css.
+  // The tab and the popover are two separate windows. An earlier version grew a single
+  // window on hover, which meant moving and resizing it and re-offsetting the tab inside it
+  // across several async steps — the tab visibly jumped in between. Now this window is
+  // always exactly the tab (only resized when a drag changes its orientation), and hovering
+  // just moves the popover's window next to it.
+  //
+  // Collapsed sizes kept in sync by hand with collapsed_size() in src-tauri/src/config.rs,
+  // and with notch.css; the popover window's with tauri.conf.json and popover.css.
   const TAB_VERTICAL = { width: 64, height: 128 };
   const TAB_HORIZONTAL = { width: 136, height: 56 };
-  const POPOVER = { width: 280, height: 188 };
+  const POPOVER_WINDOW = { width: 300, height: 208 };
+  const POPOVER_MARGIN = 10;
   const POPOVER_GAP = 12;
+  // Where the popover window waits while closed. Moving it (SWP_NOACTIVATE) instead of
+  // show()/hide() matters: show() on Windows activates the window, stealing focus from
+  // whatever app the user is typing in every time they hover the notch.
+  const PARKED = { x: -10000, y: -10000 };
   // Keeps the popover's pointer clear of its rounded corners when the tab sits near the
   // end of a monitor edge and the popover gets clamped off-center from it.
   const TAIL_INSET = 24;
 
   const HOVER_EXPAND_DELAY = 120;
   const HOVER_COLLAPSE_DELAY = 350;
-  // Matches the popover's fade transition in notch.css — used to time the real OS window
-  // resize on collapse (see collapse()'s comment for why this can't be transitionend).
-  const COLLAPSE_RESIZE_DELAY_MS = 170;
+  // Matches the popover's fade-out in popover.css: parking it any sooner would cut the
+  // animation off. A plain timer rather than transitionend, since that one isn't
+  // guaranteed to fire (a reversed transition never does).
+  const PARK_DELAY_MS = 170;
   const SNAP_MARGIN = 48; // logical px
   const USAGE_POLL_MS = 8000;
-  const USAGE_WINDOW_MS = 5 * 60 * 60 * 1000;
   const ALWAYS_ON_TOP_REASSERT_MS = 3000;
-  const CAPTURE_NOTE_MS = 3000;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 18;
-
-  const WEEKLY_RESET_FORMAT = new Intl.DateTimeFormat("pt-BR", {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 
   const notchEl = document.getElementById("notch");
   const tabRing = document.getElementById("tab-ring");
   const tabRingProgress = document.getElementById("tab-ring-progress");
   const tabPercent = document.getElementById("tab-percent");
-  const sessionReset = document.getElementById("session-reset");
-  const sessionFill = document.getElementById("session-fill");
-  const sessionUsed = document.getElementById("session-used");
-  const weeklyLine = document.getElementById("weekly-line");
-  const weeklyReset = document.getElementById("weekly-reset");
-  const weeklyFill = document.getElementById("weekly-fill");
-  const weeklyUsed = document.getElementById("weekly-used");
-  const usageFootnote = document.getElementById("usage-footnote");
-  const captureBtn = document.getElementById("capture-btn");
 
   let edge = "top";
   let offsetCenter = 0;
   let isExpanded = false;
   let isDragging = false;
+  let hoverTab = false;
+  let hoverPopover = false;
   let expandTimer = null;
   let collapseTimer = null;
-  let collapseResizeTimer = null;
+  let parkTimer = null;
   let lastUsageDto = null;
-  let captureNote = null;
+  let popoverWindowPromise = null;
 
   // Manual, pointer-capture-driven drag state (see the pointerdown handler below for why
   // this replaces Tauri's native startDragging()).
@@ -77,7 +74,7 @@
   // nearer the top *within* that band. Any other app that also marks itself topmost (tray
   // flyouts, overlays, other widgets) can end up drawing over the notch over time. The
   // standard fix for exactly this is what this does: keep re-asserting topmost instead of
-  // only setting it once.
+  // only setting it once. (popover.js does the same for its own window.)
   setInterval(() => {
     appWindow.setAlwaysOnTop(true).catch(() => {});
   }, ALWAYS_ON_TOP_REASSERT_MS);
@@ -86,37 +83,19 @@
     return e === "left" || e === "right";
   }
 
-  // The tab stands upright on the side edges and lies flat on the top/bottom ones, and the
-  // popover opens on its inner side — so both window sizes depend on the current edge.
-  function sizesFor(e) {
-    if (isVertical(e)) {
-      return {
-        collapsed: TAB_VERTICAL,
-        expanded: {
-          width: TAB_VERTICAL.width + POPOVER_GAP + POPOVER.width,
-          height: Math.max(TAB_VERTICAL.height, POPOVER.height),
-        },
-      };
-    }
-    return {
-      collapsed: TAB_HORIZONTAL,
-      expanded: {
-        width: Math.max(TAB_HORIZONTAL.width, POPOVER.width),
-        height: TAB_HORIZONTAL.height + POPOVER_GAP + POPOVER.height,
-      },
-    };
+  // The tab stands upright on the side edges and lies flat on the top/bottom ones.
+  function collapsedSize(e) {
+    return isVertical(e) ? TAB_VERTICAL : TAB_HORIZONTAL;
+  }
+
+  function popoverWindow() {
+    popoverWindowPromise ??= Window.getByLabel("popover");
+    return popoverWindowPromise;
   }
 
   function applyEdgeClass() {
     notchEl.classList.remove("edge-top", "edge-bottom", "edge-left", "edge-right");
     notchEl.classList.add(`edge-${edge}`);
-  }
-
-  // --tab-offset shifts the tab inside a (bigger) expanded window so it stays exactly where
-  // it was on screen while collapsed; --tail-offset aims the popover's pointer at it.
-  function setOffsets(tabOffset, tailOffset) {
-    notchEl.style.setProperty("--tab-offset", `${tabOffset}px`);
-    notchEl.style.setProperty("--tail-offset", `${tailOffset}px`);
   }
 
   function clamp(value, min, max) {
@@ -166,71 +145,104 @@
     return pos;
   }
 
+  // Where the popover window goes for the tab's current position: on the tab's inner side,
+  // POPOVER_GAP away, centered on the tab along the edge but kept inside the monitor. The
+  // pointer (tailOffset, relative to the balloon's own start) then aims at the tab's center.
+  function popoverPlacement(monitor) {
+    const tabSize = collapsedSize(edge);
+    const tab = computeWindowRect(monitor, tabSize);
+    const bodyW = POPOVER_WINDOW.width - 2 * POPOVER_MARGIN;
+    const bodyH = POPOVER_WINDOW.height - 2 * POPOVER_MARGIN;
+
+    let bodyX;
+    let bodyY;
+    let tailOffset;
+    if (isVertical(edge)) {
+      const centerY = tab.y + tabSize.height / 2;
+      bodyY = clamp(centerY - bodyH / 2, monitor.y, monitor.y + monitor.height - bodyH);
+      bodyX = edge === "right" ? tab.x - POPOVER_GAP - bodyW : tab.x + tabSize.width + POPOVER_GAP;
+      tailOffset = clamp(centerY - bodyY, TAIL_INSET, bodyH - TAIL_INSET);
+    } else {
+      const centerX = tab.x + tabSize.width / 2;
+      bodyX = clamp(centerX - bodyW / 2, monitor.x, monitor.x + monitor.width - bodyW);
+      bodyY = edge === "bottom" ? tab.y - POPOVER_GAP - bodyH : tab.y + tabSize.height + POPOVER_GAP;
+      tailOffset = clamp(centerX - bodyX, TAIL_INSET, bodyW - TAIL_INSET);
+    }
+    return { x: bodyX - POPOVER_MARGIN, y: bodyY - POPOVER_MARGIN, tailOffset };
+  }
+
+  async function parkPopover() {
+    const popover = await popoverWindow();
+    if (popover) await popover.setPosition(new LogicalPosition(PARKED.x, PARKED.y)).catch(() => {});
+  }
+
   async function expand() {
     expandTimer = null;
-    // A collapse may still be waiting to shrink the real OS window back down (see
-    // collapse()) — cancel it, or it'd shrink the window out from under the popover a
-    // moment after the user re-entered.
-    clearTimeout(collapseResizeTimer);
-    collapseResizeTimer = null;
+    // A collapse may still be waiting to park the popover (see collapse()) — cancel it, or
+    // it'd yank the popover away a moment after the user re-entered.
+    clearTimeout(parkTimer);
+    parkTimer = null;
     if (isExpanded) return;
     isExpanded = true;
 
-    const monitor = await logicalMonitor();
-    if (!monitor) {
+    const [monitor, popover] = await Promise.all([logicalMonitor(), popoverWindow()]);
+    if (!monitor || !popover) {
       isExpanded = false;
       return;
     }
-    const { collapsed, expanded } = sizesFor(edge);
-    const vertical = isVertical(edge);
-    const from = computeWindowRect(monitor, collapsed);
-    const to = computeWindowRect(monitor, expanded);
-    const tabOffset = vertical ? from.y - to.y : from.x - to.x;
-    const tabAlong = vertical ? collapsed.height : collapsed.width;
-    const popoverAlong = vertical ? POPOVER.height : POPOVER.width;
-    const tailOffset = clamp(tabOffset + tabAlong / 2, TAIL_INSET, popoverAlong - TAIL_INSET);
-
-    await moveAndResize(expanded);
-    setOffsets(tabOffset, tailOffset);
-    requestAnimationFrame(() => notchEl.classList.add("expanded"));
-    refreshUsage();
+    const place = popoverPlacement(monitor);
+    await popover.setPosition(new LogicalPosition(place.x, place.y));
+    // The popover's content stays transparent until this arrives, so moving its window
+    // into place above never shows a stale frame.
+    emit("popover-open", { edge, tailOffset: place.tailOffset });
   }
 
-  // Shrinking the real OS window back to the collapsed size is what stops it from
-  // swallowing clicks meant for whatever's underneath, so it can't depend on an event that
-  // isn't guaranteed to fire: if the mouse re-enters before the CSS fade-out finishes, that
-  // transition gets cancelled/reversed and "transitionend" never fires for it (or fires for
-  // the wrong direction) — the window would stay stuck at its expanded size, invisibly
-  // blocking clicks near the notch. A plain timer matching the transition's duration always
-  // fires, same as every other timer in this file.
   function collapse() {
+    collapseTimer = null;
     if (!isExpanded || isDragging) return;
     isExpanded = false;
-    notchEl.classList.remove("expanded");
-    clearTimeout(collapseResizeTimer);
-    collapseResizeTimer = setTimeout(() => {
-      collapseResizeTimer = null;
-      setOffsets(0, 0);
-      moveAndResize(sizesFor(edge).collapsed);
-    }, COLLAPSE_RESIZE_DELAY_MS);
+    emit("popover-close");
+    clearTimeout(parkTimer);
+    parkTimer = setTimeout(() => {
+      parkTimer = null;
+      parkPopover();
+    }, PARK_DELAY_MS);
+  }
+
+  // Hover spans two windows: the tab reports through mouseenter/mouseleave here, the
+  // popover through its "popover-hover" event. The popover only closes once the pointer is
+  // in neither, so crossing the gap between them doesn't close it.
+  function onHoverChange() {
+    if (hoverTab || hoverPopover) {
+      clearTimeout(collapseTimer);
+      collapseTimer = null;
+      // Pointer capture (see the drag handlers below) should already keep hover events
+      // from firing mid-drag per spec — the isDragging check is a defensive guard, since
+      // that behavior can't be verified without a real Windows/WebView2 install.
+      if (!isExpanded && !expandTimer && !isDragging) {
+        // Re-entering the popover while it's fading out reopens it right away.
+        expandTimer = setTimeout(expand, hoverTab ? HOVER_EXPAND_DELAY : 0);
+      }
+    } else {
+      clearTimeout(expandTimer);
+      expandTimer = null;
+      if (isExpanded && !isDragging && !collapseTimer) {
+        collapseTimer = setTimeout(collapse, HOVER_COLLAPSE_DELAY);
+      }
+    }
   }
 
   notchEl.addEventListener("mouseenter", () => {
-    clearTimeout(collapseTimer);
-    collapseTimer = null;
-    // Pointer capture (see the drag handlers below) should already keep the pointer
-    // "inside" notchEl for the whole drag per spec, so this shouldn't normally be
-    // reachable while dragging — kept as a defensive guard since that behavior can't be
-    // verified without a real Windows/WebView2 install.
-    if (isExpanded || expandTimer || isDragging) return;
-    expandTimer = setTimeout(expand, HOVER_EXPAND_DELAY);
+    hoverTab = true;
+    onHoverChange();
   });
-
   notchEl.addEventListener("mouseleave", () => {
-    clearTimeout(expandTimer);
-    expandTimer = null;
-    if (!isExpanded || isDragging) return;
-    collapseTimer = setTimeout(collapse, HOVER_COLLAPSE_DELAY);
+    hoverTab = false;
+    onHoverChange();
+  });
+  listen("popover-hover", (event) => {
+    hoverPopover = Boolean(event.payload?.inside);
+    onHoverChange();
   });
 
   // --- Drag to reposition + edge snap -------------------------------------------------
@@ -246,36 +258,27 @@
   // signal: pointerup. setPointerCapture keeps pointermove/pointerup targeted at notchEl
   // for the rest of the gesture even as the window moves out from under the cursor between
   // frames — the same mechanism used by web drag-and-drop for exactly this problem.
-  //
-  // Listens on the whole notch (tab and popover alike), so a drag can start from either;
-  // only buttons opt out, so they can still be clicked normally.
   notchEl.addEventListener("pointerdown", async (event) => {
-    if (event.button !== 0 || event.target.closest("button")) return;
+    if (event.button !== 0) return;
     clearTimeout(expandTimer);
     expandTimer = null;
     clearTimeout(collapseTimer);
     collapseTimer = null;
-    // A stale resize from a still-pending collapse must not land mid-drag or right after
-    // settling — it would reposition the window using an outdated edge/offsetCenter.
-    clearTimeout(collapseResizeTimer);
-    collapseResizeTimer = null;
+    clearTimeout(parkTimer);
+    parkTimer = null;
 
     const monitor = await logicalMonitor();
     if (!monitor) return;
 
-    // Drag math (here and in onDragSettled) assumes the window is just the collapsed tab
-    // throughout — force that *before* the drag starts rather than only after, so a drag
-    // begun from the expanded popover doesn't run with a mismatched size.
-    const { collapsed } = sizesFor(edge);
+    // The popover is placed relative to the tab, so it can't stay open while the tab moves.
     if (isExpanded) {
       isExpanded = false;
-      notchEl.classList.remove("expanded");
-      setOffsets(0, 0);
-      await moveAndResize(collapsed);
+      emit("popover-close");
     }
+    parkPopover();
 
-    dragSize = collapsed;
-    dragOrigin = computeWindowRect(monitor, collapsed);
+    dragSize = collapsedSize(edge);
+    dragOrigin = computeWindowRect(monitor, dragSize);
     dragCurrentPos = { ...dragOrigin };
     dragStartScreen = { x: event.screenX, y: event.screenY };
     isDragging = true;
@@ -338,167 +341,37 @@
     const centerY = position.y + size.height / 2 - monitor.y;
     offsetCenter = edge === "top" || edge === "bottom" ? centerX : centerY;
 
-    // Resize to the *new* edge's collapsed size: snapping from a side edge to the top one
-    // (or vice versa) flips the tab between upright and flat.
+    // Resize to the *new* edge's size: snapping from a side edge to the top one (or vice
+    // versa) flips the tab between upright and flat.
     applyEdgeClass();
-    await moveAndResize(sizesFor(edge).collapsed);
+    await moveAndResize(collapsedSize(edge));
     invoke("save_position", { edge, offset: offsetCenter }).catch(() => {});
   }
 
   // --- Usage ---------------------------------------------------------------------------
 
-  function formatTokens(n) {
-    return n.toLocaleString("pt-BR");
-  }
-
-  function formatTokensShort(n) {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(".", ",")}M`;
-    if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-    return String(n);
-  }
-
-  function formatSessionReset(ms) {
-    const totalMinutes = Math.max(Math.round(ms / 60000), 0);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    if (hours === 0) return `Reinicia em ${minutes} min`;
-    return `Reinicia em ${hours}h${String(minutes).padStart(2, "0")}`;
-  }
-
-  function levelFor(percent) {
-    if (percent >= 80) return "high";
-    if (percent >= 50) return "mid";
-    return "ok";
-  }
-
-  function setFill(el, fraction, level) {
-    el.style.width = `${clamp(fraction, 0, 1) * 100}%`;
-    el.dataset.level = level;
-  }
-
   function renderUsage(dto) {
     lastUsageDto = dto;
-
-    // Fraction (0–1) and color level shared by the tab's ring and the session bar.
-    let fraction = 0;
-    let level = "ok";
-    let tabText = "…";
-    let footnote = "";
-
-    sessionReset.textContent = "";
-    weeklyLine.hidden = true;
-
-    switch (dto.status) {
-      case "loading":
-        sessionUsed.textContent = "Carregando…";
-        break;
-      case "unavailable":
-        tabText = "—";
-        sessionUsed.textContent = "Sem dados locais";
-        footnote = dto.reason ?? "";
-        break;
-      case "idle":
-        tabText = "0%";
-        sessionUsed.textContent = "Sem sessão ativa nas últimas 5h";
-        break;
-      case "active_official": {
-        const percent = Math.round(dto.percent);
-        fraction = dto.percent / 100;
-        level = levelFor(dto.percent);
-        tabText = `${percent}%`;
-        sessionUsed.textContent = `${percent}% usado`;
-        if (dto.resets_at) {
-          sessionReset.textContent = formatSessionReset(new Date(dto.resets_at).getTime() - Date.now());
-        }
-
-        if (dto.weekly_percent != null) {
-          const weeklyPercent = Math.round(dto.weekly_percent);
-          weeklyLine.hidden = false;
-          weeklyUsed.textContent = `${weeklyPercent}% usado`;
-          weeklyReset.textContent = dto.weekly_resets_at
-            ? `Reinicia ${WEEKLY_RESET_FORMAT.format(new Date(dto.weekly_resets_at))}`
-            : "";
-          setFill(weeklyFill, dto.weekly_percent / 100, levelFor(dto.weekly_percent));
-        }
-        break;
-      }
-      case "active": {
-        // No official percentage here — the fill is how far into the 5h window we are,
-        // not plan usage, so it gets the neutral "est" color instead of a usage level.
-        const remainingMs = new Date(dto.resets_at).getTime() - Date.now();
-        fraction = 1 - remainingMs / USAGE_WINDOW_MS;
-        level = "est";
-        tabText = formatTokensShort(dto.tokens);
-        sessionUsed.textContent = `${formatTokens(dto.tokens)} tokens`;
-        sessionReset.textContent = formatSessionReset(remainingMs);
-        footnote = "Estimativa pelos logs locais, não é o limite oficial do plano.";
-        if (dto.reason) {
-          // Why the official percentage wasn't used instead — there's no console in a
-          // release build, so this is the only place a failure here is ever visible.
-          footnote += ` (debug: ${dto.reason})`;
-        }
-        break;
-      }
-    }
-
-    fraction = clamp(fraction, 0, 1);
+    const { fraction, level, tabText } = sessionSummary(dto);
     tabPercent.textContent = tabText;
     tabRing.dataset.level = level;
     tabRingProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - fraction));
-    setFill(sessionFill, fraction, level);
-
-    if (captureNote && Date.now() < captureNote.until) {
-      footnote = captureNote.text;
-    }
-    usageFootnote.textContent = footnote;
-    usageFootnote.title = footnote;
   }
 
   async function refreshUsage() {
     try {
-      const dto = await invoke("get_usage");
-      renderUsage(dto);
+      renderUsage(await invoke("get_usage"));
     } catch (err) {
       console.error("failed to refresh usage", err);
     }
   }
 
-  // Keep the "Reinicia em" countdown (and a temporary capture note's expiry) ticking
-  // between polls without re-fetching from the backend every second.
+  // The token-count fallback's ring tracks elapsed time in the 5h window, so it keeps
+  // moving between polls.
   setInterval(() => {
     if (lastUsageDto) renderUsage(lastUsageDto);
   }, 1000);
   setInterval(refreshUsage, USAGE_POLL_MS);
-
-  // --- Screenshot ------------------------------------------------------------------------
-
-  function showCaptureNote(text) {
-    captureNote = text ? { text, until: Date.now() + CAPTURE_NOTE_MS } : null;
-    if (lastUsageDto) renderUsage(lastUsageDto);
-  }
-
-  captureBtn.addEventListener("click", async () => {
-    showCaptureNote(null);
-    try {
-      // Just opens the selection overlay window — the actual result (copied/cancelled/
-      // error) arrives later via the "screenshot-result" event below, since the capture
-      // itself finishes in that other window, not this one.
-      await invoke("capture_region");
-    } catch (err) {
-      showCaptureNote(`Erro: ${err}`);
-    }
-  });
-
-  listen("screenshot-result", (event) => {
-    const { ok, message } = event.payload;
-    if (ok) {
-      showCaptureNote("Copiado para a área de transferência");
-    } else if (message) {
-      showCaptureNote(`Erro: ${message}`);
-    } else {
-      showCaptureNote(null);
-    }
-  });
 
   // --- Boot --------------------------------------------------------------------------
 
@@ -510,9 +383,12 @@
 
   // Fired by the tray's "Redefinir posição" action: the Rust side already moved (and
   // resized) the real window, this just keeps our local edge/offsetCenter from going
-  // stale, since they drive the next hover-expand or drag — without this, the notch would
+  // stale, since they drive the next hover or drag — without this, the notch would
   // silently "snap back" to the old position the next time either of those runs.
-  listen("notch-position-reset", (event) => applySettings(event.payload));
+  listen("notch-position-reset", (event) => {
+    applySettings(event.payload);
+    if (isExpanded) collapse();
+  });
 
   (async () => {
     try {

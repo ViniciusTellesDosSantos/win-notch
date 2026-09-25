@@ -17,14 +17,17 @@ A primeira versão deste app era 100% Rust com `egui`/`eframe`. Visualmente fico
 
 ```
 ├── ui/                       # frontend estático (sem build step — HTML/CSS/JS puro)
-│   ├── index.html             # janela do notch (aba na borda + balão expandido)
+│   ├── index.html             # janela da aba colada na borda
 │   ├── notch.css / style.css
-│   ├── notch.js                # state machine hover, drag+snap de borda, polling de uso
+│   ├── notch.js                # hover (entre as duas janelas), drag+snap de borda, abre/estaciona o balão
+│   ├── popover.html            # janela do balão (fica estacionada fora da tela enquanto fechado)
+│   ├── popover.css / popover.js
+│   ├── usage-format.js         # formatação de uso compartilhada pelas duas janelas
 │   ├── selection.html          # overlay fullscreen de seleção de captura
 │   └── selection.js
 └── src-tauri/
     ├── Cargo.toml
-    ├── tauri.conf.json         # janela do notch (transparente, sem decoração, always-on-top)
+    ├── tauri.conf.json         # janelas da aba e do balão (transparentes, sem decoração, always-on-top)
     ├── capabilities/default.json
     ├── icons/
     └── src/

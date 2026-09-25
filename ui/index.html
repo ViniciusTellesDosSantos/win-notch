@@ -28,43 +28,9 @@
         </svg>
         <span id="tab-percent">…</span>
       </div>
-
-      <div id="popover">
-        <header id="popover-header">
-          <svg class="header-spark" width="18" height="18"><use href="#spark" /></svg>
-          <span id="popover-title">Uso do Claude</span>
-          <button id="capture-btn" type="button" title="Capturar região" aria-label="Capturar região">
-            <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
-              <path d="M1 5V2a1 1 0 0 1 1-1h3" />
-              <path d="M11 1h3a1 1 0 0 1 1 1v3" />
-              <path d="M15 11v3a1 1 0 0 1-1 1h-3" />
-              <path d="M5 15H2a1 1 0 0 1-1-1v-3" />
-            </svg>
-          </button>
-        </header>
-
-        <section class="usage-line">
-          <div class="line-head">
-            <span class="line-label">Sessão atual</span>
-            <span id="session-reset" class="line-reset"></span>
-          </div>
-          <div class="bar"><div id="session-fill" class="bar-fill" data-level="ok"></div></div>
-          <div id="session-used" class="line-used">Carregando…</div>
-        </section>
-
-        <section id="weekly-line" class="usage-line" hidden>
-          <div class="line-head">
-            <span class="line-label">Todos os modelos</span>
-            <span id="weekly-reset" class="line-reset"></span>
-          </div>
-          <div class="bar"><div id="weekly-fill" class="bar-fill" data-level="ok"></div></div>
-          <div id="weekly-used" class="line-used"></div>
-        </section>
-
-        <p id="usage-footnote"></p>
-      </div>
     </div>
 
+    <script src="usage-format.js"></script>
     <script src="notch.js"></script>
   </body>
 </html>
