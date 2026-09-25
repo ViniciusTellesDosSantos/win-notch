@@ -65,44 +65,64 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Logical-pixel `(position, size)` of the monitor the "notch" window is currently on.
-/// Monitor geometry from the OS is always physical; converting to logical here is what
-/// lines it up with `config::collapsed_size` (declared in logical pixels, matching
-/// `tauri.conf.json`) and with the same-unit math `ui/notch.js` does at runtime.
-fn logical_monitor_geometry(window: &tauri::WebviewWindow) -> Option<((i32, i32), (u32, u32))> {
-    let monitor = window.current_monitor().ok().flatten()?;
+/// Logical size of `monitor`. Monitor geometry from the OS is always physical; converting
+/// to logical here is what lines it up with `config::collapsed_size` (declared in logical
+/// pixels, matching `tauri.conf.json`) and with the same-unit math `ui/notch.js` does.
+fn logical_monitor_size(monitor: &tauri::Monitor) -> (u32, u32) {
     let scale = monitor.scale_factor();
-    let physical_pos = monitor.position();
-    let physical_size = monitor.size();
-    Some((
-        (
-            (physical_pos.x as f64 / scale) as i32,
-            (physical_pos.y as f64 / scale) as i32,
-        ),
-        (
-            (physical_size.width as f64 / scale) as u32,
-            (physical_size.height as f64 / scale) as u32,
-        ),
-    ))
+    let size = monitor.size();
+    (
+        (size.width as f64 / scale) as u32,
+        (size.height as f64 / scale) as u32,
+    )
 }
 
-/// Moves the "notch" window to match `settings`' edge/offset. Used both at startup (before
-/// the window is ever shown) and by the tray's "reset position" action (on an already-
-/// visible, already-running window).
+/// The monitor saved in `settings`, if it's still connected; otherwise whichever one the
+/// window is on, then the primary one.
+fn target_monitor(window: &tauri::WebviewWindow, settings: &Settings) -> Option<tauri::Monitor> {
+    if let Some(name) = &settings.monitor {
+        let saved = window
+            .available_monitors()
+            .ok()
+            .and_then(|all| all.into_iter().find(|m| m.name() == Some(name)));
+        if saved.is_some() {
+            return saved;
+        }
+    }
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+}
+
+/// Moves the "notch" window to match `settings`' edge/offset/monitor. Used both at startup
+/// (before the window is ever shown) and by the tray's "reset position" action (on an
+/// already-visible, already-running window).
 fn apply_notch_position(app: &AppHandle, settings: &Settings) {
     let Some(window) = app.get_webview_window("notch") else {
         return;
     };
-    let Some((monitor_pos, monitor_size)) = logical_monitor_geometry(&window) else {
+    let Some(monitor) = target_monitor(&window, settings) else {
         return;
     };
 
     // Resized too, not just moved: the collapsed tab's orientation depends on the edge, so
     // a saved left/right edge needs the upright size tauri.conf.json can't know about.
     let size = config::collapsed_size(settings.edge);
-    let (x, y) = settings.window_position(monitor_pos, monitor_size, size);
+    let (x, y) = settings.window_position((0, 0), logical_monitor_size(&monitor), size);
+    // The position goes in as *physical* pixels using the target monitor's own scale: a
+    // logical position would be converted with the scale of whichever monitor the window
+    // is on right now, which is wrong when the two monitors are scaled differently. Size
+    // first, position second, so the window lands on the target monitor already at its
+    // final size (Windows then keeps its logical size if the scale differs there).
+    let scale = monitor.scale_factor();
+    let origin = monitor.position();
     let _ = window.set_size(tauri::LogicalSize::new(size.0 as f64, size.1 as f64));
-    let _ = window.set_position(tauri::LogicalPosition::new(x as f64, y as f64));
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        origin.x + (x as f64 * scale).round() as i32,
+        origin.y + (y as f64 * scale).round() as i32,
+    ));
 }
 
 /// Resets the notch to top-center of its current monitor and persists it — the safety net
@@ -114,10 +134,12 @@ pub fn reset_notch_position(app: &AppHandle, settings_state: &SettingsState) {
     let mut settings = settings_state.0.lock().expect("settings mutex poisoned");
     settings.edge = config::Edge::Top;
 
-    if let Some(window) = app.get_webview_window("notch") {
-        if let Some((_, (monitor_width, _))) = logical_monitor_geometry(&window) {
-            settings.offset_along_edge = monitor_width as f64 / 2.0;
-        }
+    if let Some(monitor) = app
+        .get_webview_window("notch")
+        .and_then(|window| window.current_monitor().ok().flatten())
+    {
+        settings.offset_along_edge = logical_monitor_size(&monitor).0 as f64 / 2.0;
+        settings.monitor = monitor.name().cloned();
     }
 
     if let Err(err) = settings.save() {

@@ -6,7 +6,7 @@ Nesta primeira versão:
 
 - **Percentual de uso do plano do Claude Code** (janela de 5h **e** semanal) — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. O percentual semanal só aparece quando a resposta da API o inclui — se não vier, o app não mostra a linha, não inventa o número. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h, sem dado semanal nesse modo) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
 - **Captura de tela por seleção de região** — clique no ícone do balão e arraste um retângulo. A região fica congelada no lugar com uma barra de ferramentas pra anotar: **retângulos vermelhos** (`R`), **texto** vermelho com contorno branco (`T`, clique onde escrever, `Enter` confirma) e desfazer (`Ctrl+Z`). `Enter` (ou "Copiar e salvar") finaliza — sem anotar nada, é só apertar `Enter` direto. O resultado é copiado pra área de transferência **e** salvo como PNG em `Imagens\win-notch` (`captura-AAAA-MM-DD_HH-MM-SS.png`). `Esc` cancela. Só a camada de anotações passa pelo navegador; o Rust a sobrepõe à captura original, então os pixels da tela saem exatos. O balão mostra as 4 capturas mais recentes (clique numa pra copiar de novo) e um atalho "Abrir pasta". A própria pasta é o histórico: apagar um arquivo no Explorer tira ele da lista.
-- **Notch arrastável** — uma aba preta colada na borda da tela (cantos côncavos "escorrendo" pra dentro da borda), com um anel de uso e o percentual da sessão. Passando o mouse, abre um balão ao lado com barras da sessão (5h) e de todos os modelos (semanal), coloridas pela faixa de uso (verde < 50%, laranja até 80%, vermelho acima), e o botão de captura no cabeçalho. Segure e arraste a aba: ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar — em pé nas laterais, deitada no topo/baixo — e a posição fica salva. Se você a "perder" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
+- **Notch arrastável** — uma aba preta colada na borda da tela (cantos côncavos "escorrendo" pra dentro da borda), com um anel de uso e o percentual da sessão. Passando o mouse, abre um balão ao lado com barras da sessão (5h) e de todos os modelos (semanal), coloridas pela faixa de uso (verde < 50%, laranja até 80%, vermelho acima), e o botão de captura no cabeçalho. Segure e arraste a aba: ao soltar, ela vai pra borda (topo/baixo/esquerda/direita) mais próxima do cursor, no monitor em que o cursor está — em pé nas laterais, deitada no topo/baixo. Posição e monitor ficam salvos, então com dois monitores ela volta pro mesmo monitor ao reiniciar. Se você a "perder" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
 
 ## Por que Tauri (Rust + HTML/CSS), e não só egui?
@@ -101,7 +101,7 @@ Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `
 
 ## Limitações conhecidas desta v1
 
-- **Multi-monitor**: o cálculo de borda/snap usa o monitor atual da janela; um monitor secundário com posição/escala muito diferente da primária pode se comportar de forma menos precisa. Candidato a melhoria futura.
+- **Multi-monitor**: o encaixe usa o monitor sob o cursor e as posições são aplicadas em pixels físicos com a escala do monitor alvo, então monitores com escalas diferentes (ex. 100% + 150%) funcionam. Se o monitor salvo for desconectado, o notch aparece no monitor atual/principal.
 - Sem ícone `.ico` customizado com design real ainda (usa um quadrado sólido gerado programaticamente como placeholder).
 - **Nunca testado visualmente numa tela real** — hover/expand, drag entre bordas, o overlay de seleção de captura e o ícone da bandeja foram validados só por compilação (`cargo check`/`cargo build` cross-compilado) e pela leitura cuidadosa da API do Tauri (bundle JS local, não documentação externa, já que este ambiente não tem acesso a ela). Precisa de uma passada manual numa máquina Windows de verdade.
 
@@ -111,7 +111,7 @@ Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `
 # backend Rust (a partir de src-tauri/)
 cargo check --target x86_64-pc-windows-gnu           # valida os caminhos específicos de Windows
 cargo build --release --target x86_64-pc-windows-gnu # gera o win-notch.exe de verdade
-cargo test                                            # 29 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial, capturas salvas, sobreposição de anotações)
+cargo test                                            # 30 testes unitários (geometria de borda/centro, config com monitor salvo, parsing de uso, credenciais/resposta do endpoint oficial, capturas salvas, sobreposição de anotações)
 cargo clippy
 cargo fmt
 

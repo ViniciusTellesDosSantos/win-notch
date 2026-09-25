@@ -120,10 +120,16 @@ pub fn get_settings(state: State<SettingsState>) -> Settings {
 }
 
 #[tauri::command]
-pub fn save_position(state: State<SettingsState>, edge: Edge, offset: f64) {
+pub fn save_position(
+    state: State<SettingsState>,
+    edge: Edge,
+    offset: f64,
+    monitor: Option<String>,
+) {
     let mut settings = state.0.lock().unwrap();
     settings.edge = edge;
     settings.offset_along_edge = offset;
+    settings.monitor = monitor;
     if let Err(err) = settings.save() {
         log::warn!("falha ao salvar posição do notch: {err}");
     }

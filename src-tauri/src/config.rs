@@ -25,12 +25,15 @@ pub enum Edge {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub edge: Edge,
-    /// Position of the notch's *center* along the edge, in physical pixels, measured from
-    /// the edge's start corner (left for Top/Bottom, top for Left/Right). Center-based
-    /// (rather than top-left-based) so that switching between the collapsed pill and the
-    /// expanded panel size keeps the same visual anchor point instead of jumping.
+    /// Position of the notch's *center* along the edge, in the monitor's logical pixels,
+    /// measured from the edge's start corner (left for Top/Bottom, top for Left/Right).
     pub offset_along_edge: f64,
     pub start_with_windows: bool,
+    /// Name of the monitor the notch was left on, so it comes back there after a restart.
+    /// `None` (older configs, or the OS not reporting a name) means "whichever monitor the
+    /// window starts on".
+    #[serde(default)]
+    pub monitor: Option<String>,
 }
 
 impl Default for Settings {
@@ -42,6 +45,7 @@ impl Default for Settings {
             // on a narrower screen.
             offset_along_edge: 640.0,
             start_with_windows: false,
+            monitor: None,
         }
     }
 }
@@ -115,12 +119,22 @@ mod tests {
             edge: Edge::Right,
             offset_along_edge: 123.5,
             start_with_windows: true,
+            monitor: Some("\\\\.\\DISPLAY2".into()),
         };
         let text = toml::to_string_pretty(&settings).unwrap();
         let parsed: Settings = toml::from_str(&text).unwrap();
         assert_eq!(parsed.edge, Edge::Right);
         assert_eq!(parsed.offset_along_edge, 123.5);
         assert!(parsed.start_with_windows);
+        assert_eq!(parsed.monitor.as_deref(), Some("\\\\.\\DISPLAY2"));
+    }
+
+    #[test]
+    fn config_saved_before_monitor_was_remembered_still_loads() {
+        let text = "edge = \"left\"\noffset_along_edge = 300.0\nstart_with_windows = false\n";
+        let parsed: Settings = toml::from_str(text).unwrap();
+        assert_eq!(parsed.edge, Edge::Left);
+        assert!(parsed.monitor.is_none());
     }
 
     #[test]

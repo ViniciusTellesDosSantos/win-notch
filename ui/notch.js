@@ -1,15 +1,25 @@
 (() => {
   const { invoke } = window.__TAURI__.core;
   const { listen, emit } = window.__TAURI__.event;
-  const { getCurrentWindow, Window, LogicalPosition, LogicalSize, currentMonitor } = window.__TAURI__.window;
+  const {
+    getCurrentWindow,
+    Window,
+    LogicalSize,
+    PhysicalPosition,
+    currentMonitor,
+    cursorPosition,
+    monitorFromPoint,
+  } = window.__TAURI__.window;
   const { sessionSummary } = window.UsageFormat;
 
   const appWindow = getCurrentWindow();
 
-  // Sizes and all the position/drag math below are in *logical* pixels throughout, so the
-  // notch looks the same real-world size on a 100% and a 150%/200% scaled Windows display.
-  // Monitor geometry from Tauri is physical, so it's converted via the monitor's
-  // scaleFactor in logicalMonitor() — everything past that boundary stays logical.
+  // Sizes and edge math are in the *logical* pixels of the monitor the tab is on, so the
+  // notch looks the same real-world size on a 100% and a 150%/200% scaled display. Actual
+  // window positions are always set in *physical* pixels, converted with that monitor's
+  // own scale (toPhysical): a logical position would be converted by Tauri with the scale
+  // of whichever monitor the window happens to be on at that moment, which is wrong
+  // mid-way between two monitors scaled differently.
   //
   // The tab and the popover are two separate windows. An earlier version grew a single
   // window on hover, which meant moving and resizing it and re-offsetting the tab inside it
@@ -38,7 +48,9 @@
   // animation off. A plain timer rather than transitionend, since that one isn't
   // guaranteed to fire (a reversed transition never does).
   const PARK_DELAY_MS = 170;
-  const SNAP_MARGIN = 48; // logical px
+  // Below this much pointer travel (logical px) a press is a click, not a drag, and leaves
+  // the tab exactly where it is.
+  const DRAG_THRESHOLD = 4;
   const USAGE_POLL_MS = 8000;
   const ALWAYS_ON_TOP_REASSERT_MS = 3000;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 18;
@@ -62,10 +74,10 @@
 
   // Manual, pointer-capture-driven drag state (see the pointerdown handler below for why
   // this replaces Tauri's native startDragging()).
-  let dragOrigin = null;
-  let dragCurrentPos = null;
-  let dragStartScreen = null;
-  let dragSize = null;
+  let dragGrab = null; // cursor position relative to the window's corner, physical px
+  let dragStartCursor = null;
+  let dragScale = 1;
+  let dragMoved = false;
   let dragFrame = null;
 
   // tauri.conf.json's alwaysOnTop only sets Windows' topmost flag once, at window
@@ -107,9 +119,9 @@
     return Math.min(Math.max(center - sizeAlong / 2, 0), available);
   }
 
-  async function logicalMonitor() {
-    const monitor = await currentMonitor();
-    if (!monitor) return null;
+  // A Tauri monitor (physical geometry) in its own logical pixels, plus what's needed to
+  // convert positions back to physical ones on it.
+  function toLogicalMonitor(monitor) {
     const scale = monitor.scaleFactor || 1;
     return {
       x: monitor.position.x / scale,
@@ -117,7 +129,22 @@
       width: monitor.size.width / scale,
       height: monitor.size.height / scale,
       scale,
+      physicalX: monitor.position.x,
+      physicalY: monitor.position.y,
+      name: monitor.name ?? null,
     };
+  }
+
+  async function logicalMonitor() {
+    const monitor = await currentMonitor();
+    return monitor ? toLogicalMonitor(monitor) : null;
+  }
+
+  function toPhysical(monitor, pos) {
+    return new PhysicalPosition(
+      Math.round(monitor.physicalX + (pos.x - monitor.x) * monitor.scale),
+      Math.round(monitor.physicalY + (pos.y - monitor.y) * monitor.scale),
+    );
   }
 
   function computeWindowRect(monitor, size) {
@@ -136,13 +163,15 @@
     }
   }
 
-  async function moveAndResize(size) {
-    const monitor = await logicalMonitor();
-    if (!monitor) return null;
-    const pos = computeWindowRect(monitor, size);
+  // Puts the tab on `monitor` (passed in, not looked up: right after a drag the window may
+  // still be straddling two monitors, and currentMonitor() would pick by the window rather
+  // than by where the user dropped it). Size first, then position, so the window arrives
+  // on the target monitor already at its final size — if that monitor's scale differs,
+  // Windows keeps the window's logical size as it crosses over.
+  async function placeTab(monitor) {
+    const size = collapsedSize(edge);
     await appWindow.setSize(new LogicalSize(size.width, size.height));
-    await appWindow.setPosition(new LogicalPosition(pos.x, pos.y));
-    return pos;
+    await appWindow.setPosition(toPhysical(monitor, computeWindowRect(monitor, size)));
   }
 
   // Where the popover window goes for the tab's current position: on the tab's inner side,
@@ -168,12 +197,12 @@
       bodyY = edge === "bottom" ? tab.y - POPOVER_GAP - bodyH : tab.y + tabSize.height + POPOVER_GAP;
       tailOffset = clamp(centerX - bodyX, TAIL_INSET, bodyW - TAIL_INSET);
     }
-    return { x: bodyX - POPOVER_MARGIN, y: bodyY - POPOVER_MARGIN, tailOffset };
+    return { pos: { x: bodyX - POPOVER_MARGIN, y: bodyY - POPOVER_MARGIN }, tailOffset };
   }
 
   async function parkPopover() {
     const popover = await popoverWindow();
-    if (popover) await popover.setPosition(new LogicalPosition(PARKED.x, PARKED.y)).catch(() => {});
+    if (popover) await popover.setPosition(new PhysicalPosition(PARKED.x, PARKED.y)).catch(() => {});
   }
 
   async function expand() {
@@ -191,7 +220,7 @@
       return;
     }
     const place = popoverPlacement(monitor);
-    await popover.setPosition(new LogicalPosition(place.x, place.y));
+    await popover.setPosition(toPhysical(monitor, place.pos));
     // The popover's content stays transparent until this arrives, so moving its window
     // into place above never shows a stale frame.
     emit("popover-open", { edge, tailOffset: place.tailOffset });
@@ -267,9 +296,6 @@
     clearTimeout(parkTimer);
     parkTimer = null;
 
-    const monitor = await logicalMonitor();
-    if (!monitor) return;
-
     // The popover is placed relative to the tab, so it can't stay open while the tab moves.
     if (isExpanded) {
       isExpanded = false;
@@ -277,27 +303,30 @@
     }
     parkPopover();
 
-    dragSize = collapsedSize(edge);
-    dragOrigin = computeWindowRect(monitor, dragSize);
-    dragCurrentPos = { ...dragOrigin };
-    dragStartScreen = { x: event.screenX, y: event.screenY };
+    const [cursor, windowPos] = await Promise.all([cursorPosition(), appWindow.outerPosition()]);
+    dragGrab = { x: cursor.x - windowPos.x, y: cursor.y - windowPos.y };
+    dragStartCursor = { x: cursor.x, y: cursor.y };
+    dragScale = window.devicePixelRatio || 1;
+    dragMoved = false;
     isDragging = true;
     notchEl.setPointerCapture(event.pointerId);
   });
 
-  notchEl.addEventListener("pointermove", (event) => {
-    if (!isDragging) return;
-    dragCurrentPos = {
-      x: dragOrigin.x + (event.screenX - dragStartScreen.x),
-      y: dragOrigin.y + (event.screenY - dragStartScreen.y),
-    };
-    // Coalesce to at most one setPosition call per frame instead of one per pointermove
-    // (which can fire far faster than the window can actually move via IPC).
-    if (dragFrame) return;
-    dragFrame = requestAnimationFrame(() => {
+  // The window follows the real cursor (physical, global) rather than pointer-event
+  // deltas: those are in the starting monitor's logical pixels and drift once the tab
+  // crosses onto a monitor with a different scale. At most one move in flight per frame.
+  notchEl.addEventListener("pointermove", () => {
+    if (!isDragging || dragFrame) return;
+    dragFrame = requestAnimationFrame(async () => {
+      const cursor = await cursorPosition().catch(() => null);
       dragFrame = null;
-      if (!isDragging || !dragCurrentPos) return;
-      appWindow.setPosition(new LogicalPosition(dragCurrentPos.x, dragCurrentPos.y)).catch(() => {});
+      if (!isDragging || !cursor) return;
+      if (!dragMoved) {
+        const travel = Math.hypot(cursor.x - dragStartCursor.x, cursor.y - dragStartCursor.y);
+        if (travel < DRAG_THRESHOLD * dragScale) return;
+        dragMoved = true;
+      }
+      appWindow.setPosition(new PhysicalPosition(cursor.x - dragGrab.x, cursor.y - dragGrab.y)).catch(() => {});
     });
   });
 
@@ -309,43 +338,52 @@
       cancelAnimationFrame(dragFrame);
       dragFrame = null;
     }
-    await onDragSettled(dragCurrentPos ?? dragOrigin);
+    if (dragMoved) await onDragSettled();
   }
   notchEl.addEventListener("pointerup", endDrag);
   notchEl.addEventListener("pointercancel", endDrag);
 
-  async function onDragSettled(position) {
-    const monitor = await logicalMonitor();
-    if (!monitor) return;
+  function nearestEdge(x, y, width, height) {
+    const distances = [
+      ["top", y],
+      ["bottom", height - y],
+      ["left", x],
+      ["right", width - x],
+    ];
+    distances.sort((a, b) => a[1] - b[1]);
+    return distances[0][0];
+  }
 
-    // The size that was actually being dragged — the tab's orientation for the *old* edge.
-    const size = dragSize;
+  // Snaps to the edge nearest the *cursor*, on the monitor *under the cursor*. Measuring
+  // from the tab's own edges instead (as an earlier version did) broke once the tab got
+  // wider than twice the snap margin — with the cursor at the screen's side, the flat tab's
+  // far edge could never get close enough — and with two monitors the window straddles the
+  // boundary, so "the window's monitor" is a coin toss. The notch always hugs some edge, so
+  // there's no margin at all: wherever it's dropped, it goes to the closest one.
+  async function onDragSettled() {
+    const cursor = await cursorPosition().catch(() => null);
+    const raw =
+      (cursor && (await monitorFromPoint(cursor.x, cursor.y).catch(() => null))) || (await currentMonitor());
+    if (!raw) return;
+    const monitor = toLogicalMonitor(raw);
 
-    const distTop = Math.abs(position.y - monitor.y);
-    const distBottom = Math.abs(position.y + size.height - (monitor.y + monitor.height));
-    const distLeft = Math.abs(position.x - monitor.x);
-    const distRight = Math.abs(position.x + size.width - (monitor.x + monitor.width));
-
-    const candidates = [
-      ["top", distTop],
-      ["bottom", distBottom],
-      ["left", distLeft],
-      ["right", distRight],
-    ].sort((a, b) => a[1] - b[1]);
-
-    if (candidates[0][1] <= SNAP_MARGIN) {
-      edge = candidates[0][0];
+    const x = cursor ? clamp((cursor.x - raw.position.x) / monitor.scale, 0, monitor.width) : monitor.width / 2;
+    const y = cursor ? clamp((cursor.y - raw.position.y) / monitor.scale, 0, monitor.height) : 0;
+    const previousEdge = edge;
+    edge = nearestEdge(x, y, monitor.width, monitor.height);
+    offsetCenter = isVertical(edge) ? y : x;
+    if (edge === previousEdge) {
+      // Same edge: keep the spot the tab was grabbed by under the cursor rather than
+      // re-centering on it. (After switching edges the tab turns, so there's no such spot.)
+      const size = collapsedSize(edge);
+      const alongSize = isVertical(edge) ? size.height : size.width;
+      const grabAlong = (isVertical(edge) ? dragGrab.y : dragGrab.x) / dragScale;
+      offsetCenter += alongSize / 2 - grabAlong;
     }
 
-    const centerX = position.x + size.width / 2 - monitor.x;
-    const centerY = position.y + size.height / 2 - monitor.y;
-    offsetCenter = edge === "top" || edge === "bottom" ? centerX : centerY;
-
-    // Resize to the *new* edge's size: snapping from a side edge to the top one (or vice
-    // versa) flips the tab between upright and flat.
     applyEdgeClass();
-    await moveAndResize(collapsedSize(edge));
-    invoke("save_position", { edge, offset: offsetCenter }).catch(() => {});
+    await placeTab(monitor);
+    invoke("save_position", { edge, offset: offsetCenter, monitor: monitor.name }).catch(() => {});
   }
 
   // --- Usage ---------------------------------------------------------------------------
