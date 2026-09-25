@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <title>win-notch — captura</title>
     <style>
+      :root {
+        --annotation: #ff2d2d;
+      }
+
       html,
       body {
         margin: 0;
@@ -20,6 +24,9 @@
           "Segoe UI",
           system-ui,
           sans-serif;
+      }
+      body.annotating {
+        cursor: default;
       }
 
       #hint {
@@ -38,6 +45,7 @@
       #selection-rect {
         position: absolute;
         display: none;
+        box-sizing: border-box;
         border: 1.5px solid rgba(255, 255, 255, 0.95);
         background: rgba(255, 255, 255, 0.1);
         box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.28);
@@ -55,12 +63,127 @@
         pointer-events: none;
         white-space: nowrap;
       }
+
+      /* Annotate mode: the captured region shown frozen in place, with the drawing layer
+         exactly on top of it. */
+      #frozen,
+      #layer {
+        position: absolute;
+        display: none;
+      }
+      #frozen {
+        pointer-events: none;
+      }
+      #layer {
+        outline: 1.5px solid rgba(255, 255, 255, 0.95);
+        cursor: crosshair;
+      }
+      #layer.tool-text {
+        cursor: text;
+      }
+
+      #text-input {
+        position: absolute;
+        display: none;
+        min-width: 40px;
+        margin: 0;
+        padding: 0;
+        border: none;
+        outline: 1px dashed rgba(255, 255, 255, 0.8);
+        background: transparent;
+        color: var(--annotation);
+        font: 700 20px/1.2 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        text-shadow:
+          -1.5px -1.5px 0 #fff,
+          1.5px -1.5px 0 #fff,
+          -1.5px 1.5px 0 #fff,
+          1.5px 1.5px 0 #fff;
+      }
+
+      #toolbar {
+        position: absolute;
+        display: none;
+        align-items: center;
+        gap: 4px;
+        padding: 5px;
+        border-radius: 12px;
+        background: #0b0b0c;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        cursor: default;
+      }
+      #toolbar button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 32px;
+        min-width: 32px;
+        padding: 0 8px;
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: #f2f2f3;
+        font: 600 13px "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        cursor: pointer;
+      }
+      #toolbar button:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      #toolbar button.active {
+        background: rgba(255, 45, 45, 0.22);
+        color: #ff6b6b;
+      }
+      #toolbar button.primary {
+        background: #f2f2f3;
+        color: #0b0b0c;
+      }
+      #toolbar button.primary:hover {
+        background: #fff;
+      }
+      #toolbar svg {
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+      }
+      #toolbar .sep {
+        width: 1px;
+        height: 20px;
+        margin: 0 4px;
+        background: rgba(255, 255, 255, 0.16);
+      }
     </style>
   </head>
   <body>
     <div id="hint">Arraste para selecionar · Esc para cancelar</div>
     <div id="selection-rect"></div>
     <div id="dimension-label"></div>
+
+    <img id="frozen" alt="" />
+    <canvas id="layer"></canvas>
+    <input id="text-input" type="text" spellcheck="false" autocomplete="off" />
+
+    <div id="toolbar">
+      <button type="button" class="tool active" data-tool="rect" title="Retângulo (R)">
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1" /></svg>
+      </button>
+      <button type="button" class="tool" data-tool="text" title="Texto (T)">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 3.5h10M8 3.5v10" /></svg>
+      </button>
+      <button type="button" id="undo-btn" title="Desfazer (Ctrl+Z)">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M5.5 3 2.5 6l3 3" /><path d="M2.5 6H10a3.5 3.5 0 0 1 0 7H7" /></svg>
+      </button>
+      <span class="sep"></span>
+      <button type="button" id="cancel-btn" title="Cancelar (Esc)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" /></svg>
+      </button>
+      <button type="button" id="done-btn" class="primary" title="Copiar e salvar (Enter)">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.2L13 5" /></svg>
+        Copiar e salvar
+      </button>
+    </div>
+
     <script src="selection.js"></script>
   </body>
 </html>

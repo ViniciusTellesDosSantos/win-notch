@@ -5,7 +5,7 @@ Overlay estilo "notch" para Windows, inspirado no [codenotch](https://github.com
 Nesta primeira versão:
 
 - **Percentual de uso do plano do Claude Code** (janela de 5h **e** semanal) — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. O percentual semanal só aparece quando a resposta da API o inclui — se não vier, o app não mostra a linha, não inventa o número. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h, sem dado semanal nesse modo) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
-- **Captura de tela por seleção de região** — clique no ícone do balão, arraste um retângulo: ele é copiado pra área de transferência **e** salvo como PNG em `Imagens\win-notch` (`captura-AAAA-MM-DD_HH-MM-SS.png`). `Esc` cancela. O balão mostra as 4 capturas mais recentes (clique numa pra copiar de novo) e um atalho "Abrir pasta". A própria pasta é o histórico: apagar um arquivo no Explorer tira ele da lista.
+- **Captura de tela por seleção de região** — clique no ícone do balão e arraste um retângulo. A região fica congelada no lugar com uma barra de ferramentas pra anotar: **retângulos vermelhos** (`R`), **texto** vermelho com contorno branco (`T`, clique onde escrever, `Enter` confirma) e desfazer (`Ctrl+Z`). `Enter` (ou "Copiar e salvar") finaliza — sem anotar nada, é só apertar `Enter` direto. O resultado é copiado pra área de transferência **e** salvo como PNG em `Imagens\win-notch` (`captura-AAAA-MM-DD_HH-MM-SS.png`). `Esc` cancela. Só a camada de anotações passa pelo navegador; o Rust a sobrepõe à captura original, então os pixels da tela saem exatos. O balão mostra as 4 capturas mais recentes (clique numa pra copiar de novo) e um atalho "Abrir pasta". A própria pasta é o histórico: apagar um arquivo no Explorer tira ele da lista.
 - **Notch arrastável** — uma aba preta colada na borda da tela (cantos côncavos "escorrendo" pra dentro da borda), com um anel de uso e o percentual da sessão. Passando o mouse, abre um balão ao lado com barras da sessão (5h) e de todos os modelos (semanal), coloridas pela faixa de uso (verde < 50%, laranja até 80%, vermelho acima), e o botão de captura no cabeçalho. Segure e arraste a aba: ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar — em pé nas laterais, deitada no topo/baixo — e a posição fica salva. Se você a "perder" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
 
@@ -23,7 +23,7 @@ A primeira versão deste app era 100% Rust com `egui`/`eframe`. Visualmente fico
 │   ├── popover.html            # janela do balão (fica estacionada fora da tela enquanto fechado)
 │   ├── popover.css / popover.js
 │   ├── usage-format.js         # formatação de uso compartilhada pelas duas janelas
-│   ├── selection.html          # overlay fullscreen de seleção de captura
+│   ├── selection.html          # overlay fullscreen de seleção + anotação da captura
 │   └── selection.js
 └── src-tauri/
     ├── Cargo.toml
@@ -111,7 +111,7 @@ Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `
 # backend Rust (a partir de src-tauri/)
 cargo check --target x86_64-pc-windows-gnu           # valida os caminhos específicos de Windows
 cargo build --release --target x86_64-pc-windows-gnu # gera o win-notch.exe de verdade
-cargo test                                            # 26 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial, capturas salvas)
+cargo test                                            # 29 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial, capturas salvas, sobreposição de anotações)
 cargo clippy
 cargo fmt
 

@@ -142,17 +142,33 @@ pub async fn capture_region(app: AppHandle) -> Result<(), String> {
     screenshot::open_selection_overlay(app)
 }
 
+/// Crops the chosen region and returns it as PNG bytes (raw, not JSON) for the overlay to
+/// show frozen while the user annotates it.
 #[tauri::command]
-pub fn finish_selection(
+pub async fn preview_selection(
     app: AppHandle,
     x: i32,
     y: i32,
     width: u32,
     height: u32,
+) -> Result<tauri::ipc::Response, String> {
+    screenshot::preview_selection(app, x, y, width, height).map(tauri::ipc::Response::new)
+}
+
+/// Finishes the capture. The request body is the annotation layer as raw PNG bytes — empty
+/// when nothing was drawn.
+#[tauri::command]
+pub async fn finish_annotated(
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<(), String> {
-    let outcome = screenshot::finish_selection(app.clone(), x, y, width, height);
+    let layer = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) if !bytes.is_empty() => Some(bytes.as_slice()),
+        _ => None,
+    };
+    let outcome = screenshot::finish_annotated(app.clone(), layer);
     let payload = match &outcome {
-        Ok(Some(finished)) => match &finished.saved_to {
+        Ok(finished) => match &finished.saved_to {
             Ok(path) => ScreenshotResult {
                 ok: true,
                 message: None,
@@ -163,11 +179,6 @@ pub fn finish_selection(
                 message: Some(err.clone()),
                 saved: None,
             },
-        },
-        Ok(None) => ScreenshotResult {
-            ok: false,
-            message: None,
-            saved: None,
         },
         Err(err) => ScreenshotResult {
             ok: false,
