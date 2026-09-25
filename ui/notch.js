@@ -21,7 +21,7 @@
   // and with notch.css; the popover window's with tauri.conf.json and popover.css.
   const TAB_VERTICAL = { width: 64, height: 128 };
   const TAB_HORIZONTAL = { width: 136, height: 56 };
-  const POPOVER_WINDOW = { width: 300, height: 208 };
+  const POPOVER_WINDOW = { width: 300, height: 292 };
   const POPOVER_MARGIN = 10;
   const POPOVER_GAP = 12;
   // Where the popover window waits while closed. Moving it (SWP_NOACTIVATE) instead of

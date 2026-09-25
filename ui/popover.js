@@ -23,6 +23,8 @@
   const weeklyUsed = document.getElementById("weekly-used");
   const usageFootnote = document.getElementById("usage-footnote");
   const captureBtn = document.getElementById("capture-btn");
+  const captureList = document.getElementById("capture-list");
+  const openFolderBtn = document.getElementById("open-folder");
 
   let lastUsageDto = null;
   let captureNote = null;
@@ -41,6 +43,7 @@
     rootEl.style.setProperty("--tail-offset", `${tailOffset}px`);
     if (lastUsageDto) renderUsage(lastUsageDto);
     refreshUsage();
+    refreshCaptures();
     requestAnimationFrame(() => rootEl.classList.add("open"));
   });
 
@@ -149,15 +152,66 @@
   });
 
   listen("screenshot-result", (event) => {
-    const { ok, message } = event.payload;
-    if (ok) {
-      showCaptureNote("Copiado para a área de transferência");
+    const { ok, message, saved } = event.payload;
+    if (ok && saved) {
+      showCaptureNote("Copiado e salvo na pasta de capturas");
+    } else if (ok) {
+      // Still on the clipboard; only writing the file failed.
+      showCaptureNote(`Copiado, mas não salvo: ${message}`);
     } else if (message) {
       showCaptureNote(`Erro: ${message}`);
     } else {
       showCaptureNote(null);
     }
+    if (ok) refreshCaptures();
+  });
+
+  // --- Recent captures -------------------------------------------------------------------
+
+  function renderCaptures(entries) {
+    captureList.replaceChildren();
+    if (entries.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "captures-empty";
+      empty.textContent = "Nenhuma captura ainda";
+      captureList.append(empty);
+      return;
+    }
+    for (const entry of entries) {
+      const thumb = document.createElement("button");
+      thumb.type = "button";
+      thumb.className = "capture-thumb";
+      thumb.title = `${entry.name} — clique pra copiar de novo`;
+      if (entry.thumb) {
+        const img = document.createElement("img");
+        img.src = entry.thumb;
+        img.alt = "";
+        thumb.append(img);
+      }
+      thumb.addEventListener("click", async () => {
+        try {
+          await invoke("copy_capture", { path: entry.path });
+          showCaptureNote("Copiado para a área de transferência");
+        } catch (err) {
+          showCaptureNote(`Erro: ${err}`);
+        }
+      });
+      captureList.append(thumb);
+    }
+  }
+
+  async function refreshCaptures() {
+    try {
+      renderCaptures(await invoke("list_captures"));
+    } catch (err) {
+      console.error("failed to list captures", err);
+    }
+  }
+
+  openFolderBtn.addEventListener("click", () => {
+    invoke("open_captures_folder").catch((err) => showCaptureNote(`Erro: ${err}`));
   });
 
   refreshUsage();
+  refreshCaptures();
 })();

@@ -3,7 +3,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::config::{Edge, Settings};
 use crate::usage::{UsageStatus, UsageWatcher};
-use crate::{autostart, screenshot};
+use crate::{autostart, captures, screenshot};
 
 pub struct SettingsState(pub Mutex<Settings>);
 
@@ -13,8 +13,11 @@ pub struct SettingsState(pub Mutex<Settings>);
 pub struct ScreenshotResult {
     pub ok: bool,
     /// `None` with `ok: false` means the user cancelled — nothing to show. `Some` means an
-    /// actual error message to display.
+    /// actual error message to display. With `ok: true`, why saving the file failed (the
+    /// image still made it to the clipboard).
     pub message: Option<String>,
+    /// Where the capture was saved, when that worked.
+    pub saved: Option<String>,
 }
 
 /// Flat DTO for the frontend — easier to consume in plain JS than a tagged Rust enum.
@@ -149,17 +152,62 @@ pub fn finish_selection(
 ) -> Result<(), String> {
     let outcome = screenshot::finish_selection(app.clone(), x, y, width, height);
     let payload = match &outcome {
-        Ok(()) => ScreenshotResult {
-            ok: true,
+        Ok(Some(finished)) => match &finished.saved_to {
+            Ok(path) => ScreenshotResult {
+                ok: true,
+                message: None,
+                saved: Some(path.to_string_lossy().into_owned()),
+            },
+            Err(err) => ScreenshotResult {
+                ok: true,
+                message: Some(err.clone()),
+                saved: None,
+            },
+        },
+        Ok(None) => ScreenshotResult {
+            ok: false,
             message: None,
+            saved: None,
         },
         Err(err) => ScreenshotResult {
             ok: false,
             message: Some(err.clone()),
+            saved: None,
         },
     };
     let _ = app.emit("screenshot-result", payload);
-    outcome
+    outcome.map(|_| ())
+}
+
+/// Newest saved captures with thumbnails, for the popover. Async so decoding a thumbnail
+/// for the first time doesn't run on the main thread.
+#[tauri::command]
+pub async fn list_captures() -> Vec<captures::CaptureEntry> {
+    captures::recent()
+}
+
+/// Copies a saved capture (one from `list_captures`) back to the clipboard.
+#[tauri::command]
+pub async fn copy_capture(path: String) -> Result<(), String> {
+    let file = captures::resolve_capture(&path)?;
+    let image = image::open(&file)
+        .map_err(|e| format!("não foi possível abrir a captura: {e}"))?
+        .to_rgba8();
+    screenshot::copy_image_to_clipboard(image)
+}
+
+#[tauri::command]
+pub fn open_captures_folder() -> Result<(), String> {
+    let dir = captures::captures_dir().ok_or("pasta de capturas não encontrada")?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| format!("não foi possível abrir o Explorer: {e}"))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -170,6 +218,7 @@ pub fn cancel_selection(app: AppHandle) -> Result<(), String> {
         ScreenshotResult {
             ok: false,
             message: None,
+            saved: None,
         },
     );
     outcome

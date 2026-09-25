@@ -31,6 +31,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 walkdir = "2"
 log = "0.4"
 env_logger = "0.11"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 auto-launch = "0.5"

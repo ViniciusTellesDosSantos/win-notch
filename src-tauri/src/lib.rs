@@ -1,4 +1,5 @@
 mod autostart;
+mod captures;
 mod commands;
 mod config;
 mod screenshot;
@@ -55,6 +56,9 @@ pub fn run() {
             commands::capture_region,
             commands::finish_selection,
             commands::cancel_selection,
+            commands::list_captures,
+            commands::copy_capture,
+            commands::open_captures_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

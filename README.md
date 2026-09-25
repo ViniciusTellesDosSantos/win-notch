@@ -5,7 +5,7 @@ Overlay estilo "notch" para Windows, inspirado no [codenotch](https://github.com
 Nesta primeira versão:
 
 - **Percentual de uso do plano do Claude Code** (janela de 5h **e** semanal) — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. O percentual semanal só aparece quando a resposta da API o inclui — se não vier, o app não mostra a linha, não inventa o número. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h, sem dado semanal nesse modo) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
-- **Captura de tela por seleção de região** — clique no botão no painel expandido, arraste um retângulo, ele é copiado direto pra área de transferência. `Esc` cancela.
+- **Captura de tela por seleção de região** — clique no ícone do balão, arraste um retângulo: ele é copiado pra área de transferência **e** salvo como PNG em `Imagens\win-notch` (`captura-AAAA-MM-DD_HH-MM-SS.png`). `Esc` cancela. O balão mostra as 4 capturas mais recentes (clique numa pra copiar de novo) e um atalho "Abrir pasta". A própria pasta é o histórico: apagar um arquivo no Explorer tira ele da lista.
 - **Notch arrastável** — uma aba preta colada na borda da tela (cantos côncavos "escorrendo" pra dentro da borda), com um anel de uso e o percentual da sessão. Passando o mouse, abre um balão ao lado com barras da sessão (5h) e de todos os modelos (semanal), coloridas pela faixa de uso (verde < 50%, laranja até 80%, vermelho acima), e o botão de captura no cabeçalho. Segure e arraste a aba: ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar — em pé nas laterais, deitada no topo/baixo — e a posição fica salva. Se você a "perder" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
 
@@ -40,6 +40,7 @@ A primeira versão deste app era 100% Rust com `egui`/`eframe`. Visualmente fico
         │   ├── anthropic_oauth.rs  # percentual oficial via credenciais do claude CLI
         │   └── claude_code.rs      # fallback: parsing dos JSONL e cálculo da janela de 5h
         ├── screenshot.rs        # captura de monitores (xcap) + crop + clipboard (arboard)
+        ├── captures.rs          # capturas salvas: PNG em Imagens\win-notch, lista recente + miniaturas
         ├── tray.rs              # ícone na bandeja (API nativa do Tauri) e menu
         └── autostart.rs         # toggle "iniciar com o Windows"
 ```
@@ -110,7 +111,7 @@ Se o percentual não aparecer (o notch mostra a estimativa em tokens em vez de `
 # backend Rust (a partir de src-tauri/)
 cargo check --target x86_64-pc-windows-gnu           # valida os caminhos específicos de Windows
 cargo build --release --target x86_64-pc-windows-gnu # gera o win-notch.exe de verdade
-cargo test                                            # 21 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial)
+cargo test                                            # 26 testes unitários (geometria de borda/centro, parsing de uso, credenciais/resposta do endpoint oficial, capturas salvas)
 cargo clippy
 cargo fmt
 

@@ -1,6 +1,7 @@
 //! Screen-capture flow: grab every monitor, spawn a fullscreen selection overlay window
-//! (`ui/selection.html` drives the drag-rectangle UI), then crop and copy the result to
-//! the clipboard once the frontend reports the chosen rectangle.
+//! (`ui/selection.html` drives the drag-rectangle UI), then crop the result, save it as a
+//! PNG (see `captures.rs`) and copy it to the clipboard once the frontend reports the
+//! chosen rectangle.
 //!
 //! Windows-only (xcap/arboard); stubbed out elsewhere so the crate still builds and can be
 //! type-checked cross-platform.
@@ -152,6 +153,14 @@ pub fn open_selection_overlay(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// What happened to a finished capture. It's always on the clipboard by the time this is
+/// returned; saving the file is best-effort on top of that, so a save failure is reported
+/// alongside instead of failing the whole capture.
+pub struct FinishedCapture {
+    pub saved_to: Result<std::path::PathBuf, String>,
+}
+
+/// `Ok(None)` means an empty selection — treated like a cancel.
 #[cfg(windows)]
 pub fn finish_selection(
     app: AppHandle,
@@ -159,7 +168,7 @@ pub fn finish_selection(
     y: i32,
     width: u32,
     height: u32,
-) -> Result<(), String> {
+) -> Result<Option<FinishedCapture>, String> {
     let shots = app.state::<PendingCapture>().0.lock().unwrap().take();
 
     if let Some(window) = app.get_webview_window("selection") {
@@ -170,17 +179,24 @@ pub fn finish_selection(
         return Err("nenhuma captura pendente".into());
     };
     if width == 0 || height == 0 {
-        return Ok(());
+        return Ok(None);
     }
 
     let cropped =
         win::crop_selection(&shots, x, y, width, height).ok_or("seleção fora da área capturada")?;
 
+    let saved_to = crate::captures::save_capture(&cropped);
+    copy_image_to_clipboard(cropped)?;
+    Ok(Some(FinishedCapture { saved_to }))
+}
+
+#[cfg(windows)]
+pub fn copy_image_to_clipboard(image: image::RgbaImage) -> Result<(), String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let image_data = arboard::ImageData {
-        width: cropped.width() as usize,
-        height: cropped.height() as usize,
-        bytes: std::borrow::Cow::Owned(cropped.into_raw()),
+        width: image.width() as usize,
+        height: image.height() as usize,
+        bytes: std::borrow::Cow::Owned(image.into_raw()),
     };
     clipboard.set_image(image_data).map_err(|e| e.to_string())
 }
@@ -206,8 +222,13 @@ pub fn finish_selection(
     _y: i32,
     _width: u32,
     _height: u32,
-) -> Result<(), String> {
-    Ok(())
+) -> Result<Option<FinishedCapture>, String> {
+    Ok(None)
+}
+
+#[cfg(not(windows))]
+pub fn copy_image_to_clipboard(_image: image::RgbaImage) -> Result<(), String> {
+    Err("área de transferência só é suportada no Windows".to_string())
 }
 
 #[cfg(not(windows))]
