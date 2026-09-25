@@ -6,7 +6,7 @@ Nesta primeira versão:
 
 - **Percentual de uso do plano do Claude Code** (janela de 5h **e** semanal) — lido do mesmo endpoint oficial (não-documentado publicamente, mas usado pelo próprio `claude` CLI) que o `/usage` do REPL usa, via o token OAuth que o CLI já mantém em `~/.claude/.credentials.json`. O percentual semanal só aparece quando a resposta da API o inclui — se não vier, o app não mostra a linha, não inventa o número. Quando essa fonte não está disponível por qualquer motivo (token expirado, sem rede, etc.), cai de volta pra uma estimativa derivada dos transcripts locais em `~/.claude/projects/**/*.jsonl` (tokens consumidos na janela de 5h, sem dado semanal nesse modo) — ver seção "Percentual de uso" abaixo pros detalhes e riscos dessa parte.
 - **Captura de tela por seleção de região** — clique no botão no painel expandido, arraste um retângulo, ele é copiado direto pra área de transferência. `Esc` cancela.
-- **Notch arrastável** — segure e arraste a pílula; ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar, e a posição fica salva. Colapsada, a pílula é só um ícone de 32px sem texto (anel de uso em miniatura) — se você a arrastar pra algum lugar e "perdê-la" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
+- **Notch arrastável** — uma aba preta colada na borda da tela (cantos côncavos "escorrendo" pra dentro da borda), com um anel de uso e o percentual da sessão. Passando o mouse, abre um balão ao lado com barras da sessão (5h) e de todos os modelos (semanal), coloridas pela faixa de uso (verde < 50%, laranja até 80%, vermelho acima), e o botão de captura no cabeçalho. Segure e arraste a aba: ela encaixa na borda (topo/baixo/esquerda/direita) mais próxima de onde você soltar — em pé nas laterais, deitada no topo/baixo — e a posição fica salva. Se você a "perder" de vista, o menu da bandeja tem **"Redefinir posição"**, que centraliza de volta no topo da tela atual na hora.
 - Integração com Google Calendar: **fora de escopo por enquanto** (há um placeholder "Agenda: em breve" no painel).
 
 ## Por que Tauri (Rust + HTML/CSS), e não só egui?
@@ -17,7 +17,7 @@ A primeira versão deste app era 100% Rust com `egui`/`eframe`. Visualmente fico
 
 ```
 ├── ui/                       # frontend estático (sem build step — HTML/CSS/JS puro)
-│   ├── index.html             # janela do notch (pílula + painel expandido)
+│   ├── index.html             # janela do notch (aba na borda + balão expandido)
 │   ├── notch.css / style.css
 │   ├── notch.js                # state machine hover, drag+snap de borda, polling de uso
 │   ├── selection.html          # overlay fullscreen de seleção de captura

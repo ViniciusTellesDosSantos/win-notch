@@ -1,9 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Collapsed pill size, in *logical* pixels — kept in sync by hand with `COLLAPSED_SIZE`
-/// in `ui/notch.js`, since there's no build step sharing constants between the two.
-pub const COLLAPSED_SIZE: (u32, u32) = (32, 32);
+/// Collapsed tab size for `edge`, in *logical* pixels: upright on the side edges, flat on
+/// the top/bottom ones (body plus a concave corner on each side along the edge). Kept in
+/// sync by hand with `TAB_VERTICAL`/`TAB_HORIZONTAL` in `ui/notch.js`, since there's no
+/// build step sharing constants between the two.
+pub fn collapsed_size(edge: Edge) -> (u32, u32) {
+    match edge {
+        Edge::Top | Edge::Bottom => (136, 56),
+        Edge::Left | Edge::Right => (64, 128),
+    }
+}
 
 /// Which screen edge the notch is anchored to. Matches the strings used on the JS side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +121,18 @@ mod tests {
         assert_eq!(parsed.edge, Edge::Right);
         assert_eq!(parsed.offset_along_edge, 123.5);
         assert!(parsed.start_with_windows);
+    }
+
+    #[test]
+    fn collapsed_tab_is_flat_on_top_bottom_and_upright_on_sides() {
+        for edge in [Edge::Top, Edge::Bottom] {
+            let (w, h) = collapsed_size(edge);
+            assert!(w > h, "{edge:?} tab should be wider than tall");
+        }
+        for edge in [Edge::Left, Edge::Right] {
+            let (w, h) = collapsed_size(edge);
+            assert!(h > w, "{edge:?} tab should be taller than wide");
+        }
     }
 
     #[test]

@@ -9,33 +9,49 @@
   // notch looks the same real-world size on a 100% and a 150%/200% scaled Windows display.
   // Monitor geometry from Tauri is physical, so it's converted via the monitor's
   // scaleFactor in logicalMonitor() — everything past that boundary stays logical.
-  // COLLAPSED_SIZE is kept in sync by hand with COLLAPSED_SIZE in src-tauri/src/config.rs.
-  const COLLAPSED_SIZE = { width: 32, height: 32 };
-  const EXPANDED_SIZE = { width: 340, height: 232 };
+  //
+  // The tab's collapsed sizes (body + a 14px concave corner on each side along the edge)
+  // are kept in sync by hand with collapsed_size() in src-tauri/src/config.rs, and all of
+  // these with the geometry in notch.css.
+  const TAB_VERTICAL = { width: 64, height: 128 };
+  const TAB_HORIZONTAL = { width: 136, height: 56 };
+  const POPOVER = { width: 280, height: 188 };
+  const POPOVER_GAP = 12;
+  // Keeps the popover's pointer clear of its rounded corners when the tab sits near the
+  // end of a monitor edge and the popover gets clamped off-center from it.
+  const TAIL_INSET = 24;
+
   const HOVER_EXPAND_DELAY = 120;
   const HOVER_COLLAPSE_DELAY = 350;
-  // Matches the width/height transition duration in notch.css — used to time the real OS
-  // window resize on collapse (see collapse()'s comment for why this can't be transitionend).
+  // Matches the popover's fade transition in notch.css — used to time the real OS window
+  // resize on collapse (see collapse()'s comment for why this can't be transitionend).
   const COLLAPSE_RESIZE_DELAY_MS = 170;
   const SNAP_MARGIN = 48; // logical px
   const USAGE_POLL_MS = 8000;
   const USAGE_WINDOW_MS = 5 * 60 * 60 * 1000;
   const ALWAYS_ON_TOP_REASSERT_MS = 3000;
-  const RING_CIRCUMFERENCE = 2 * Math.PI * 27;
-  const PILL_RING_CIRCUMFERENCE = 2 * Math.PI * 12;
+  const CAPTURE_NOTE_MS = 3000;
+  const RING_CIRCUMFERENCE = 2 * Math.PI * 18;
+
+  const WEEKLY_RESET_FORMAT = new Intl.DateTimeFormat("pt-BR", {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   const notchEl = document.getElementById("notch");
-  const pillRing = document.getElementById("pill-ring");
-  const pillRingProgress = document.getElementById("pill-ring-progress");
-  const headerDot = document.getElementById("header-dot");
-  const usagePrimary = document.getElementById("usage-primary");
-  const usageSecondary = document.getElementById("usage-secondary");
-  const usageWeekly = document.getElementById("usage-weekly");
+  const tabRing = document.getElementById("tab-ring");
+  const tabRingProgress = document.getElementById("tab-ring-progress");
+  const tabPercent = document.getElementById("tab-percent");
+  const sessionReset = document.getElementById("session-reset");
+  const sessionFill = document.getElementById("session-fill");
+  const sessionUsed = document.getElementById("session-used");
+  const weeklyLine = document.getElementById("weekly-line");
+  const weeklyReset = document.getElementById("weekly-reset");
+  const weeklyFill = document.getElementById("weekly-fill");
+  const weeklyUsed = document.getElementById("weekly-used");
   const usageFootnote = document.getElementById("usage-footnote");
-  const ringProgress = document.getElementById("ring-progress");
   const captureBtn = document.getElementById("capture-btn");
-  const captureMessage = document.getElementById("capture-message");
-  const freshnessEl = document.getElementById("freshness");
 
   let edge = "top";
   let offsetCenter = 0;
@@ -45,12 +61,14 @@
   let collapseTimer = null;
   let collapseResizeTimer = null;
   let lastUsageDto = null;
+  let captureNote = null;
 
   // Manual, pointer-capture-driven drag state (see the pointerdown handler below for why
   // this replaces Tauri's native startDragging()).
   let dragOrigin = null;
   let dragCurrentPos = null;
   let dragStartScreen = null;
+  let dragSize = null;
   let dragFrame = null;
 
   // tauri.conf.json's alwaysOnTop only sets Windows' topmost flag once, at window
@@ -64,9 +82,45 @@
     appWindow.setAlwaysOnTop(true).catch(() => {});
   }, ALWAYS_ON_TOP_REASSERT_MS);
 
+  function isVertical(e) {
+    return e === "left" || e === "right";
+  }
+
+  // The tab stands upright on the side edges and lies flat on the top/bottom ones, and the
+  // popover opens on its inner side — so both window sizes depend on the current edge.
+  function sizesFor(e) {
+    if (isVertical(e)) {
+      return {
+        collapsed: TAB_VERTICAL,
+        expanded: {
+          width: TAB_VERTICAL.width + POPOVER_GAP + POPOVER.width,
+          height: Math.max(TAB_VERTICAL.height, POPOVER.height),
+        },
+      };
+    }
+    return {
+      collapsed: TAB_HORIZONTAL,
+      expanded: {
+        width: Math.max(TAB_HORIZONTAL.width, POPOVER.width),
+        height: TAB_HORIZONTAL.height + POPOVER_GAP + POPOVER.height,
+      },
+    };
+  }
+
   function applyEdgeClass() {
     notchEl.classList.remove("edge-top", "edge-bottom", "edge-left", "edge-right");
     notchEl.classList.add(`edge-${edge}`);
+  }
+
+  // --tab-offset shifts the tab inside a (bigger) expanded window so it stays exactly where
+  // it was on screen while collapsed; --tail-offset aims the popover's pointer at it.
+  function setOffsets(tabOffset, tailOffset) {
+    notchEl.style.setProperty("--tab-offset", `${tabOffset}px`);
+    notchEl.style.setProperty("--tail-offset", `${tailOffset}px`);
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
   }
 
   function clampCenter(total, center, sizeAlong) {
@@ -74,8 +128,6 @@
     return Math.min(Math.max(center - sizeAlong / 2, 0), available);
   }
 
-  // Converts Tauri's physical monitor geometry into logical pixels, matching the unit
-  // every size/position value in this file is expressed in.
   async function logicalMonitor() {
     const monitor = await currentMonitor();
     if (!monitor) return null;
@@ -117,24 +169,40 @@
   async function expand() {
     expandTimer = null;
     // A collapse may still be waiting to shrink the real OS window back down (see
-    // collapse()) — cancel it, or it'd shrink the window out from under the panel a
+    // collapse()) — cancel it, or it'd shrink the window out from under the popover a
     // moment after the user re-entered.
     clearTimeout(collapseResizeTimer);
     collapseResizeTimer = null;
     if (isExpanded) return;
     isExpanded = true;
-    await moveAndResize(EXPANDED_SIZE);
+
+    const monitor = await logicalMonitor();
+    if (!monitor) {
+      isExpanded = false;
+      return;
+    }
+    const { collapsed, expanded } = sizesFor(edge);
+    const vertical = isVertical(edge);
+    const from = computeWindowRect(monitor, collapsed);
+    const to = computeWindowRect(monitor, expanded);
+    const tabOffset = vertical ? from.y - to.y : from.x - to.x;
+    const tabAlong = vertical ? collapsed.height : collapsed.width;
+    const popoverAlong = vertical ? POPOVER.height : POPOVER.width;
+    const tailOffset = clamp(tabOffset + tabAlong / 2, TAIL_INSET, popoverAlong - TAIL_INSET);
+
+    await moveAndResize(expanded);
+    setOffsets(tabOffset, tailOffset);
     requestAnimationFrame(() => notchEl.classList.add("expanded"));
     refreshUsage();
   }
 
-  // Shrinking the real OS window back to COLLAPSED_SIZE is what stops it from swallowing
-  // clicks meant for whatever's underneath, so it can't depend on an event that isn't
-  // guaranteed to fire: if the mouse re-enters before the CSS shrink transition finishes,
-  // that transition gets cancelled/reversed and "transitionend" never fires for it (or
-  // fires for the wrong direction) — the window would stay stuck at EXPANDED_SIZE,
-  // invisibly blocking clicks near the notch. A plain timer matching the transition's
-  // duration always fires, same as every other timer in this file.
+  // Shrinking the real OS window back to the collapsed size is what stops it from
+  // swallowing clicks meant for whatever's underneath, so it can't depend on an event that
+  // isn't guaranteed to fire: if the mouse re-enters before the CSS fade-out finishes, that
+  // transition gets cancelled/reversed and "transitionend" never fires for it (or fires for
+  // the wrong direction) — the window would stay stuck at its expanded size, invisibly
+  // blocking clicks near the notch. A plain timer matching the transition's duration always
+  // fires, same as every other timer in this file.
   function collapse() {
     if (!isExpanded || isDragging) return;
     isExpanded = false;
@@ -142,7 +210,8 @@
     clearTimeout(collapseResizeTimer);
     collapseResizeTimer = setTimeout(() => {
       collapseResizeTimer = null;
-      moveAndResize(COLLAPSED_SIZE);
+      setOffsets(0, 0);
+      moveAndResize(sizesFor(edge).collapsed);
     }, COLLAPSE_RESIZE_DELAY_MS);
   }
 
@@ -178,13 +247,10 @@
   // for the rest of the gesture even as the window moves out from under the cursor between
   // frames — the same mechanism used by web drag-and-drop for exactly this problem.
   //
-  // Listens on the whole notch (not just #pill): hovering for HOVER_EXPAND_DELAY (120ms)
-  // before the user manages to press the button is the common case, not the exception, so
-  // by the time pointerdown would fire on #pill it's usually already hidden behind the
-  // expanded panel (pointer-events: none). Dragging from the panel background works too;
-  // only the capture button opts out, so it can still be clicked normally.
+  // Listens on the whole notch (tab and popover alike), so a drag can start from either;
+  // only buttons opt out, so they can still be clicked normally.
   notchEl.addEventListener("pointerdown", async (event) => {
-    if (event.button !== 0 || event.target.closest("#capture-btn")) return;
+    if (event.button !== 0 || event.target.closest("button")) return;
     clearTimeout(expandTimer);
     expandTimer = null;
     clearTimeout(collapseTimer);
@@ -197,16 +263,19 @@
     const monitor = await logicalMonitor();
     if (!monitor) return;
 
-    // Drag math (here and in onDragSettled) assumes the window's logical footprint is
-    // COLLAPSED_SIZE throughout — force that *before* the drag starts rather than only
-    // after, so a drag begun from the expanded panel doesn't run with mismatched size.
+    // Drag math (here and in onDragSettled) assumes the window is just the collapsed tab
+    // throughout — force that *before* the drag starts rather than only after, so a drag
+    // begun from the expanded popover doesn't run with a mismatched size.
+    const { collapsed } = sizesFor(edge);
     if (isExpanded) {
       isExpanded = false;
       notchEl.classList.remove("expanded");
-      await moveAndResize(COLLAPSED_SIZE);
+      setOffsets(0, 0);
+      await moveAndResize(collapsed);
     }
 
-    dragOrigin = computeWindowRect(monitor, COLLAPSED_SIZE);
+    dragSize = collapsed;
+    dragOrigin = computeWindowRect(monitor, collapsed);
     dragCurrentPos = { ...dragOrigin };
     dragStartScreen = { x: event.screenX, y: event.screenY };
     isDragging = true;
@@ -246,7 +315,8 @@
     const monitor = await logicalMonitor();
     if (!monitor) return;
 
-    const size = COLLAPSED_SIZE;
+    // The size that was actually being dragged — the tab's orientation for the *old* edge.
+    const size = dragSize;
 
     const distTop = Math.abs(position.y - monitor.y);
     const distBottom = Math.abs(position.y + size.height - (monitor.y + monitor.height));
@@ -268,8 +338,10 @@
     const centerY = position.y + size.height / 2 - monitor.y;
     offsetCenter = edge === "top" || edge === "bottom" ? centerX : centerY;
 
+    // Resize to the *new* edge's collapsed size: snapping from a side edge to the top one
+    // (or vice versa) flips the tab between upright and flat.
     applyEdgeClass();
-    await moveAndResize(COLLAPSED_SIZE);
+    await moveAndResize(sizesFor(edge).collapsed);
     invoke("save_position", { edge, offset: offsetCenter }).catch(() => {});
   }
 
@@ -279,96 +351,107 @@
     return n.toLocaleString("pt-BR");
   }
 
-  function formatDuration(ms) {
+  function formatTokensShort(n) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(".", ",")}M`;
+    if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+    return String(n);
+  }
+
+  function formatSessionReset(ms) {
     const totalMinutes = Math.max(Math.round(ms / 60000), 0);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    return `${hours}h${String(minutes).padStart(2, "0")}min`;
+    if (hours === 0) return `Reinicia em ${minutes} min`;
+    return `Reinicia em ${hours}h${String(minutes).padStart(2, "0")}`;
   }
 
-  // The weekly window can reset up to 7 days out — "172h34min" is technically correct but
-  // unreadable, so once it's past a day this switches to a coarser "3d 4h" instead.
-  function formatLongDuration(ms) {
-    const totalHours = Math.max(Math.round(ms / 3_600_000), 0);
-    if (totalHours < 24) {
-      return formatDuration(ms);
-    }
-    const days = Math.floor(totalHours / 24);
-    const hours = totalHours % 24;
-    return `${days}d ${hours}h`;
+  function levelFor(percent) {
+    if (percent >= 80) return "high";
+    if (percent >= 50) return "mid";
+    return "ok";
+  }
+
+  function setFill(el, fraction, level) {
+    el.style.width = `${clamp(fraction, 0, 1) * 100}%`;
+    el.dataset.level = level;
   }
 
   function renderUsage(dto) {
     lastUsageDto = dto;
-    headerDot.dataset.state = dto.status;
-    pillRing.dataset.state = dto.status;
 
-    // Fraction (0–1) driving both rings — the mini one at rest and the big one expanded
-    // show the exact same number, just at different sizes.
+    // Fraction (0–1) and color level shared by the tab's ring and the session bar.
     let fraction = 0;
+    let level = "ok";
+    let tabText = "…";
+    let footnote = "";
 
-    usageWeekly.textContent = "";
+    sessionReset.textContent = "";
+    weeklyLine.hidden = true;
 
     switch (dto.status) {
       case "loading":
-        usagePrimary.textContent = "Carregando…";
-        usageSecondary.textContent = "";
-        usageFootnote.textContent = "";
+        sessionUsed.textContent = "Carregando…";
         break;
       case "unavailable":
-        usagePrimary.textContent = "Sem dados locais";
-        usageSecondary.textContent = dto.reason ?? "";
-        usageFootnote.textContent = "";
+        tabText = "—";
+        sessionUsed.textContent = "Sem dados locais";
+        footnote = dto.reason ?? "";
         break;
       case "idle":
-        usagePrimary.textContent = "Sem sessão ativa";
-        usageSecondary.textContent = "nas últimas 5h";
-        usageFootnote.textContent = "";
+        tabText = "0%";
+        sessionUsed.textContent = "Sem sessão ativa nas últimas 5h";
         break;
       case "active_official": {
         const percent = Math.round(dto.percent);
-        usagePrimary.textContent = `${percent}%`;
+        fraction = dto.percent / 100;
+        level = levelFor(dto.percent);
+        tabText = `${percent}%`;
+        sessionUsed.textContent = `${percent}% usado`;
         if (dto.resets_at) {
-          const remainingMs = new Date(dto.resets_at).getTime() - Date.now();
-          usageSecondary.textContent = `reinicia em ${formatDuration(remainingMs)}`;
-        } else {
-          usageSecondary.textContent = "janela de 5h";
+          sessionReset.textContent = formatSessionReset(new Date(dto.resets_at).getTime() - Date.now());
         }
-        usageFootnote.textContent = "";
 
         if (dto.weekly_percent != null) {
           const weeklyPercent = Math.round(dto.weekly_percent);
-          if (dto.weekly_resets_at) {
-            const weeklyRemainingMs = new Date(dto.weekly_resets_at).getTime() - Date.now();
-            usageWeekly.textContent = `Semana: ${weeklyPercent}% · reinicia em ${formatLongDuration(weeklyRemainingMs)}`;
-          } else {
-            usageWeekly.textContent = `Semana: ${weeklyPercent}%`;
-          }
+          weeklyLine.hidden = false;
+          weeklyUsed.textContent = `${weeklyPercent}% usado`;
+          weeklyReset.textContent = dto.weekly_resets_at
+            ? `Reinicia ${WEEKLY_RESET_FORMAT.format(new Date(dto.weekly_resets_at))}`
+            : "";
+          setFill(weeklyFill, dto.weekly_percent / 100, levelFor(dto.weekly_percent));
         }
-
-        fraction = Math.min(Math.max(dto.percent / 100, 0), 1);
         break;
       }
       case "active": {
-        usagePrimary.textContent = `${formatTokens(dto.tokens)} tokens`;
+        // No official percentage here — the fill is how far into the 5h window we are,
+        // not plan usage, so it gets the neutral "est" color instead of a usage level.
         const remainingMs = new Date(dto.resets_at).getTime() - Date.now();
-        usageSecondary.textContent = `reinicia em ${formatDuration(remainingMs)}`;
-        usageFootnote.textContent = "Estimativa derivada dos logs locais, não é o limite oficial do plano.";
+        fraction = 1 - remainingMs / USAGE_WINDOW_MS;
+        level = "est";
+        tabText = formatTokensShort(dto.tokens);
+        sessionUsed.textContent = `${formatTokens(dto.tokens)} tokens`;
+        sessionReset.textContent = formatSessionReset(remainingMs);
+        footnote = "Estimativa pelos logs locais, não é o limite oficial do plano.";
         if (dto.reason) {
           // Why the official percentage wasn't used instead — there's no console in a
           // release build, so this is the only place a failure here is ever visible.
-          usageFootnote.textContent += ` (debug: ${dto.reason})`;
+          footnote += ` (debug: ${dto.reason})`;
         }
-        fraction = Math.min(Math.max(1 - remainingMs / USAGE_WINDOW_MS, 0), 1);
         break;
       }
     }
 
-    ringProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - fraction));
-    pillRingProgress.style.strokeDashoffset = String(PILL_RING_CIRCUMFERENCE * (1 - fraction));
+    fraction = clamp(fraction, 0, 1);
+    tabPercent.textContent = tabText;
+    tabRing.dataset.level = level;
+    tabRingProgress.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - fraction));
+    setFill(sessionFill, fraction, level);
 
-    const ageSeconds = Math.max(Math.round((Date.now() - new Date(dto.last_updated).getTime()) / 1000), 0);
-    freshnessEl.textContent = `atualizado há ${ageSeconds}s`;
+    if (captureNote && Date.now() < captureNote.until) {
+      footnote = captureNote.text;
+    }
+    usageFootnote.textContent = footnote;
+    usageFootnote.title = footnote;
   }
 
   async function refreshUsage() {
@@ -380,8 +463,8 @@
     }
   }
 
-  // Keep the "reinicia em"/"atualizado há" countdowns ticking between polls without
-  // re-fetching from the backend every second.
+  // Keep the "Reinicia em" countdown (and a temporary capture note's expiry) ticking
+  // between polls without re-fetching from the backend every second.
   setInterval(() => {
     if (lastUsageDto) renderUsage(lastUsageDto);
   }, 1000);
@@ -389,26 +472,31 @@
 
   // --- Screenshot ------------------------------------------------------------------------
 
+  function showCaptureNote(text) {
+    captureNote = text ? { text, until: Date.now() + CAPTURE_NOTE_MS } : null;
+    if (lastUsageDto) renderUsage(lastUsageDto);
+  }
+
   captureBtn.addEventListener("click", async () => {
-    captureMessage.textContent = "";
+    showCaptureNote(null);
     try {
       // Just opens the selection overlay window — the actual result (copied/cancelled/
       // error) arrives later via the "screenshot-result" event below, since the capture
       // itself finishes in that other window, not this one.
       await invoke("capture_region");
     } catch (err) {
-      captureMessage.textContent = `Erro: ${err}`;
+      showCaptureNote(`Erro: ${err}`);
     }
   });
 
   listen("screenshot-result", (event) => {
     const { ok, message } = event.payload;
     if (ok) {
-      captureMessage.textContent = "Copiado para a área de transferência";
+      showCaptureNote("Copiado para a área de transferência");
     } else if (message) {
-      captureMessage.textContent = `Erro: ${message}`;
+      showCaptureNote(`Erro: ${message}`);
     } else {
-      captureMessage.textContent = "";
+      showCaptureNote(null);
     }
   });
 
@@ -420,10 +508,10 @@
     applyEdgeClass();
   }
 
-  // Fired by the tray's "Redefinir posição" action: the Rust side already moved the real
-  // window, this just keeps our local edge/offsetCenter from going stale, since they drive
-  // the next hover-expand or drag — without this, the notch would silently "snap back" to
-  // the old position the next time either of those runs.
+  // Fired by the tray's "Redefinir posição" action: the Rust side already moved (and
+  // resized) the real window, this just keeps our local edge/offsetCenter from going
+  // stale, since they drive the next hover-expand or drag — without this, the notch would
+  // silently "snap back" to the old position the next time either of those runs.
   listen("notch-position-reset", (event) => applySettings(event.payload));
 
   (async () => {

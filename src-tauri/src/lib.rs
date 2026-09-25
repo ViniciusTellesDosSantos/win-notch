@@ -62,7 +62,7 @@ pub fn run() {
 
 /// Logical-pixel `(position, size)` of the monitor the "notch" window is currently on.
 /// Monitor geometry from the OS is always physical; converting to logical here is what
-/// lines it up with `COLLAPSED_SIZE` (declared in logical pixels, matching
+/// lines it up with `config::collapsed_size` (declared in logical pixels, matching
 /// `tauri.conf.json`) and with the same-unit math `ui/notch.js` does at runtime.
 fn logical_monitor_geometry(window: &tauri::WebviewWindow) -> Option<((i32, i32), (u32, u32))> {
     let monitor = window.current_monitor().ok().flatten()?;
@@ -92,7 +92,11 @@ fn apply_notch_position(app: &AppHandle, settings: &Settings) {
         return;
     };
 
-    let (x, y) = settings.window_position(monitor_pos, monitor_size, config::COLLAPSED_SIZE);
+    // Resized too, not just moved: the collapsed tab's orientation depends on the edge, so
+    // a saved left/right edge needs the upright size tauri.conf.json can't know about.
+    let size = config::collapsed_size(settings.edge);
+    let (x, y) = settings.window_position(monitor_pos, monitor_size, size);
+    let _ = window.set_size(tauri::LogicalSize::new(size.0 as f64, size.1 as f64));
     let _ = window.set_position(tauri::LogicalPosition::new(x as f64, y as f64));
 }
 

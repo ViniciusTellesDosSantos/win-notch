@@ -1,233 +1,321 @@
+/* Geometry here is kept in sync by hand with sizesFor() in notch.js (and collapsed_size()
+   in src-tauri/src/config.rs): tab body 64x100 (left/right) or 108x56 (top/bottom), plus
+   a 14px concave corner on each side along the edge; popover 280x188, 12px from the tab. */
+
 #notch {
   position: absolute;
-  width: 32px;
-  height: 32px;
-  border-radius: 16px;
-  background: var(--bg);
-  backdrop-filter: blur(26px) saturate(180%);
-  -webkit-backdrop-filter: blur(26px) saturate(180%);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  transition:
-    width 170ms cubic-bezier(0.22, 0.9, 0.3, 1),
-    height 170ms cubic-bezier(0.22, 0.9, 0.3, 1),
-    border-radius 170ms ease;
+  inset: 0;
   cursor: default;
 }
 
-/* Anchoring: the notch always hugs one screen edge and is centered on the other axis, so
-   it grows symmetrically around its drag position instead of jumping. */
-#notch.edge-top {
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
+/* Colors follow usage level (set as data-level by notch.js): green, orange, red — plus
+   "est" for the token-count fallback, where the fill is time elapsed, not plan usage. */
+[data-level="ok"] {
+  --level: var(--ok);
 }
-#notch.edge-bottom {
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
+[data-level="mid"] {
+  --level: var(--mid);
 }
-#notch.edge-left {
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+[data-level="high"] {
+  --level: var(--high);
 }
-#notch.edge-right {
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+[data-level="est"] {
+  --level: var(--text-muted);
 }
 
-#notch.expanded {
-  width: 340px;
-  height: 232px;
-  border-radius: 22px;
-}
+/* --- Tab ------------------------------------------------------------------------------ */
 
-#pill {
+#tab {
   position: absolute;
-  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 1;
-  transition: opacity 110ms ease;
-}
-#notch.expanded #pill {
-  opacity: 0;
-  pointer-events: none;
+  background: var(--bg);
 }
 
-/* Mini usage ring shown at rest — icon-only, no label, mirrors the big ring in the
-   expanded panel (same fraction, same color logic) at a glance. */
-#pill-ring .track {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.14);
-  stroke-width: 3;
+/* The two concave corners where the tab flows into the screen edge: a square that's
+   transparent inside a quarter circle and tab-colored outside it. */
+#tab::before,
+#tab::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
 }
-#pill-ring .progress {
+
+#notch.edge-left #tab,
+#notch.edge-right #tab {
+  top: calc(var(--tab-offset, 0px) + 14px);
+  width: 64px;
+  height: 100px;
+  flex-direction: column;
+  gap: 6px;
+}
+#notch.edge-right #tab {
+  right: 0;
+  border-radius: 22px 0 0 22px;
+}
+#notch.edge-left #tab {
+  left: 0;
+  border-radius: 0 22px 22px 0;
+}
+#notch.edge-right #tab::before {
+  top: -14px;
+  right: 0;
+  background: radial-gradient(circle at 0 0, transparent 13.5px, var(--bg) 14px);
+}
+#notch.edge-right #tab::after {
+  bottom: -14px;
+  right: 0;
+  background: radial-gradient(circle at 0 100%, transparent 13.5px, var(--bg) 14px);
+}
+#notch.edge-left #tab::before {
+  top: -14px;
+  left: 0;
+  background: radial-gradient(circle at 100% 0, transparent 13.5px, var(--bg) 14px);
+}
+#notch.edge-left #tab::after {
+  bottom: -14px;
+  left: 0;
+  background: radial-gradient(circle at 100% 100%, transparent 13.5px, var(--bg) 14px);
+}
+
+#notch.edge-top #tab,
+#notch.edge-bottom #tab {
+  left: calc(var(--tab-offset, 0px) + 14px);
+  width: 108px;
+  height: 56px;
+  flex-direction: row;
+  gap: 8px;
+}
+#notch.edge-top #tab {
+  top: 0;
+  border-radius: 0 0 22px 22px;
+}
+#notch.edge-bottom #tab {
+  bottom: 0;
+  border-radius: 22px 22px 0 0;
+}
+#notch.edge-top #tab::before {
+  left: -14px;
+  top: 0;
+  background: radial-gradient(circle at 0 100%, transparent 13.5px, var(--bg) 14px);
+}
+#notch.edge-top #tab::after {
+  right: -14px;
+  top: 0;
+  background: radial-gradient(circle at 100% 100%, transparent 13.5px, var(--bg) 14px);
+}
+#notch.edge-bottom #tab::before {
+  left: -14px;
+  bottom: 0;
+  background: radial-gradient(circle at 0 0, transparent 13.5px, var(--bg) 14px);
+}
+#notch.edge-bottom #tab::after {
+  right: -14px;
+  bottom: 0;
+  background: radial-gradient(circle at 100% 0, transparent 13.5px, var(--bg) 14px);
+}
+
+#tab-ring {
+  flex: none;
+  color: var(--text);
+}
+#tab-ring .track {
   fill: none;
-  stroke: var(--text-muted);
-  stroke-width: 3;
+  stroke: var(--track);
+  stroke-width: 4;
+}
+#tab-ring .progress {
+  fill: none;
+  stroke: var(--level);
+  stroke-width: 4;
   stroke-linecap: round;
   transform: rotate(-90deg);
-  transform-origin: 16px 16px;
-  stroke-dasharray: 75.4;
-  stroke-dashoffset: 75.4;
-  transition: stroke-dashoffset 400ms ease, stroke 200ms ease;
-}
-#pill-ring[data-state="active"] .progress,
-#pill-ring[data-state="active_official"] .progress {
-  stroke: var(--accent);
-}
-#pill-ring[data-state="unavailable"] .progress {
-  stroke: var(--warn);
+  transform-origin: 22px 22px;
+  stroke-dasharray: 113.1;
+  stroke-dashoffset: 113.1;
+  transition:
+    stroke-dashoffset 400ms ease,
+    stroke 200ms ease;
 }
 
-#header-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex: none;
-  transition: background 200ms ease, box-shadow 200ms ease;
-}
-#header-dot[data-state="active"],
-#header-dot[data-state="active_official"] {
-  background: var(--accent);
-  box-shadow: 0 0 8px 1px var(--accent-dim);
-}
-#header-dot[data-state="unavailable"] {
-  background: var(--warn);
+#tab-percent {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
-#panel {
+/* --- Popover -------------------------------------------------------------------------- */
+
+#popover {
   position: absolute;
-  inset: 0;
-  padding: 16px 18px;
+  width: 280px;
+  height: 188px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
+  border-radius: 18px;
   opacity: 0;
-  transition: opacity 140ms ease 40ms;
+  transform: scale(0.96);
   pointer-events: none;
+  transition:
+    opacity 170ms ease,
+    transform 170ms cubic-bezier(0.22, 0.9, 0.3, 1);
 }
-#notch.expanded #panel {
+#notch.expanded #popover {
   opacity: 1;
+  transform: none;
   pointer-events: auto;
 }
 
-#panel-header {
+#notch.edge-right #popover {
+  right: 76px;
+  top: 0;
+  transform-origin: right center;
+}
+#notch.edge-left #popover {
+  left: 76px;
+  top: 0;
+  transform-origin: left center;
+}
+#notch.edge-top #popover {
+  top: 68px;
+  left: 0;
+  transform-origin: center top;
+}
+#notch.edge-bottom #popover {
+  bottom: 68px;
+  left: 0;
+  transform-origin: center bottom;
+}
+
+/* Pointer toward the tab; --tail-offset is the tab's center along the edge (notch.js). */
+#popover::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: var(--bg);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+#notch.edge-right #popover::after {
+  right: -6px;
+  top: calc(var(--tail-offset, 50%) - 7px);
+}
+#notch.edge-left #popover::after {
+  left: -6px;
+  top: calc(var(--tail-offset, 50%) - 7px);
+}
+#notch.edge-top #popover::after {
+  top: -6px;
+  left: calc(var(--tail-offset, 50%) - 7px);
+}
+#notch.edge-bottom #popover::after {
+  bottom: -6px;
+  left: calc(var(--tail-offset, 50%) - 7px);
+}
+
+#popover-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
+  gap: 8px;
+  height: 26px;
+  margin-bottom: 10px;
 }
-#panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+.header-spark {
+  flex: none;
+  color: var(--text);
 }
-
-#usage-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.ring-track {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.1);
-  stroke-width: 5;
-}
-.ring-progress {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 5;
-  stroke-linecap: round;
-  transform: rotate(-90deg);
-  transform-origin: 32px 32px;
-  stroke-dasharray: 169.6;
-  stroke-dashoffset: 169.6;
-  transition: stroke-dashoffset 400ms ease, stroke 200ms ease;
-}
-
-#usage-info {
-  min-width: 0;
-}
-#usage-primary {
+#popover-title {
+  flex: 1;
   font-size: 15px;
   font-weight: 600;
-  line-height: 1.25;
-}
-#usage-secondary {
-  font-size: 11.5px;
-  margin-top: 2px;
-}
-
-#usage-weekly {
-  margin: 10px 0 0;
-}
-
-#usage-footnote {
-  margin: 6px 0 0;
-  line-height: 1.35;
-}
-
-#divider {
-  height: 1px;
-  background: var(--border);
-  margin: 12px 0 10px;
 }
 
 #capture-btn {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 100%;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 12.5px;
-  font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, transform 80ms ease;
+  transition:
+    background 120ms ease,
+    transform 80ms ease;
 }
 #capture-btn:hover {
-  background: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.16);
 }
 #capture-btn:active {
-  transform: scale(0.98);
+  transform: scale(0.94);
 }
-#capture-icon {
+#capture-btn svg {
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
-  flex: none;
 }
 
-#capture-message {
-  margin: 6px 0 0;
-  min-height: 14px;
+.usage-line + .usage-line {
+  margin-top: 8px;
 }
-
-#calendar-placeholder {
-  margin: 10px 0 0;
+.usage-line[hidden] {
+  display: none;
 }
-
-#freshness {
-  margin: 4px 0 0;
+.line-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 13px;
 }
-
-.muted {
+.line-label {
+  font-weight: 500;
+}
+.line-reset {
+  font-size: 12px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
-.small {
-  font-size: 11.5px;
+.bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+  overflow: hidden;
 }
-.tiny {
-  font-size: 10px;
+.bar-fill {
+  width: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--level);
+  transition:
+    width 400ms ease,
+    background 200ms ease;
+}
+.line-used {
+  margin-top: 5px;
+  font-size: 12.5px;
+}
+
+#usage-footnote {
+  margin: auto 0 0;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#usage-footnote:empty {
+  display: none;
 }
