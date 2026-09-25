@@ -1,16 +1,24 @@
-# Builds the Windows installer and publishes a GitHub Release whenever a version tag
-# (v0.2.0, v0.3.1, ...) is pushed. The release also carries latest.json + the installer's
-# signature, which is what the app's auto-updater (tauri-plugin-updater) reads.
+# Builds the Windows installer and publishes a GitHub Release whenever the app version in
+# src-tauri/tauri.conf.json changes (or when run by hand from the Actions tab). The release
+# also carries latest.json + the installer's signature, which is what the app's
+# auto-updater (tauri-plugin-updater) reads.
+#
+# The tag (vX.Y.Z) is created by tauri-action itself, through this workflow's token —
+# nothing needs to push tags. If a release for the current version already exists, the
+# build is skipped, so unrelated pushes that touch this file don't publish duplicates.
 #
 # Needs one repository secret: TAURI_SIGNING_PRIVATE_KEY (the updater signing key; its
-# public half is in src-tauri/tauri.conf.json under plugins.updater.pubkey). The tag must
-# match "version" in tauri.conf.json.
+# public half is in src-tauri/tauri.conf.json under plugins.updater.pubkey).
 name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - claude/eager-newton-ycc5h0
+    paths:
+      - src-tauri/tauri.conf.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,24 +29,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Read version and check for an existing release
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          gh release view "v$version" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release v$version already exists — skipping build."
+            "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "exists=false" >> $env:GITHUB_OUTPUT
+          }
+          exit 0
 
-      - uses: swatinem/rust-cache@v2
+      - if: steps.version.outputs.exists == 'false'
+        uses: dtolnay/rust-toolchain@stable
+
+      - if: steps.version.outputs.exists == 'false'
+        uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
       - name: Install Tauri CLI
+        if: steps.version.outputs.exists == 'false'
         run: cargo install tauri-cli --version "^2" --locked
 
-      - uses: tauri-apps/tauri-action@v0
+      - if: steps.version.outputs.exists == 'false'
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tauriScript: cargo tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: win-notch ${{ github.ref_name }}
+          tagName: v__VERSION__
+          releaseName: win-notch v__VERSION__
+          releaseCommitish: ${{ github.sha }}
           releaseBody: >-
             Primeira instalação: baixe e rode o `win-notch_*_x64-setup.exe` abaixo.
             Quem já tem o app instalado recebe esta versão pela atualização automática.
