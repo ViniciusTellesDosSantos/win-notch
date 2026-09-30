@@ -53,6 +53,8 @@
   const DRAG_THRESHOLD = 4;
   const USAGE_POLL_MS = 8000;
   const ALWAYS_ON_TOP_REASSERT_MS = 3000;
+  const SETTINGS_RETRY_MS = 250;
+  const SETTINGS_ATTEMPTS = 40; // ~10s
   const RING_CIRCUMFERENCE = 2 * Math.PI * 18;
 
   const notchEl = document.getElementById("notch");
@@ -428,12 +430,24 @@
     if (isExpanded) collapse();
   });
 
-  (async () => {
-    try {
-      applySettings(await invoke("get_settings"));
-    } catch (err) {
-      console.error("failed to load settings", err);
+  // Retries instead of giving up after one failure: this window's JS can start before the
+  // Rust side has finished starting up (Tauri creates config windows before running setup),
+  // and falling back to the default edge would leave the tab styled for the top while it
+  // actually sits wherever it was saved.
+  async function loadSettings() {
+    for (let attempt = 0; attempt < SETTINGS_ATTEMPTS; attempt++) {
+      try {
+        applySettings(await invoke("get_settings"));
+        return;
+      } catch (err) {
+        if (attempt === SETTINGS_ATTEMPTS - 1) console.error("failed to load settings", err);
+        await new Promise((resolve) => setTimeout(resolve, SETTINGS_RETRY_MS));
+      }
     }
+  }
+
+  (async () => {
+    await loadSettings();
     refreshUsage();
   })();
 })();

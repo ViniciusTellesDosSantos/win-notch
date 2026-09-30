@@ -33,7 +33,18 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let settings = Settings::load();
-            let usage = UsageWatcher::spawn(usage::claude_code::default_projects_dir());
+
+            // Register every piece of state *first*. The windows from tauri.conf.json are
+            // created before this hook runs, so their JS is already calling commands by now;
+            // a command whose state isn't managed yet just fails. That's what left the tab
+            // styled for the top edge while sitting on the side after a slow login: its
+            // get_settings lost the race to the positioning and autostart work below.
+            app.manage(SettingsState(Mutex::new(settings.clone())));
+            app.manage(UsageWatcher::spawn(
+                usage::claude_code::default_projects_dir(),
+            ));
+            app.manage(PendingCapture::default());
+            app.manage(updater::UpdateState::default());
 
             apply_notch_position(app.handle(), &settings);
             // The window starts hidden (visible: false in tauri.conf.json) precisely so
@@ -51,11 +62,6 @@ pub fn run() {
                     log::warn!("falha ao atualizar o registro de autostart: {err}");
                 }
             }
-
-            app.manage(SettingsState(Mutex::new(settings)));
-            app.manage(usage);
-            app.manage(PendingCapture::default());
-            app.manage(updater::UpdateState::default());
 
             tray::setup(app)?;
             updater::spawn_periodic_check(app.handle().clone());
